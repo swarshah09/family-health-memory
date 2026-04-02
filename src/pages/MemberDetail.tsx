@@ -1,0 +1,135 @@
+import { useParams, useNavigate } from "react-router-dom";
+import { useApp } from "@/context/AppContext";
+import { ArrowLeft, Plus, Mic, Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useState } from "react";
+import AddLogDialog from "@/components/AddLogDialog";
+import InsightBadge from "@/components/InsightBadge";
+import { format, isToday, isYesterday } from "date-fns";
+
+function formatDateGroup(date: Date): string {
+  if (isToday(date)) return "Today";
+  if (isYesterday(date)) return "Yesterday";
+  return format(date, "EEEE, MMM d");
+}
+
+export default function MemberDetail() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { members, getLogsForMember, getInsightsForMember } = useApp();
+  const [showAddLog, setShowAddLog] = useState(false);
+
+  const member = members.find((m) => m.id === id);
+  if (!member) return <div className="p-6">Member not found</div>;
+
+  const logs = getLogsForMember(member.id);
+  const insights = getInsightsForMember(member.id);
+
+  // Group logs by date
+  const grouped: Record<string, typeof logs> = {};
+  logs.forEach((log) => {
+    const key = formatDateGroup(new Date(log.timestamp));
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(log);
+  });
+
+  return (
+    <div className="min-h-screen bg-background pb-24">
+      {/* Header */}
+      <div className="bg-card border-b border-border px-4 pt-12 pb-5">
+        <div className="flex items-center gap-3 mb-4">
+          <button onClick={() => navigate("/")} className="text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+            <span className="text-primary font-bold">{member.name[0]}</span>
+          </div>
+          <div>
+            <h1 className="font-bold text-foreground">{member.name}</h1>
+            <p className="text-xs text-muted-foreground">{member.age}y · {member.relationship}</p>
+          </div>
+        </div>
+        {member.notes && (
+          <p className="text-xs text-muted-foreground bg-muted rounded-lg px-3 py-2">
+            📋 {member.notes}
+          </p>
+        )}
+      </div>
+
+      {/* Insights strip */}
+      {insights.length > 0 && (
+        <div className="px-4 py-3 bg-insight/5 border-b border-border">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="h-4 w-4 text-insight" />
+            <span className="text-xs font-semibold text-insight">AI Insights</span>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {insights.map((ins) => (
+              <div
+                key={ins.id}
+                className="flex-shrink-0 bg-card rounded-lg border border-border px-3 py-2 max-w-[200px]"
+              >
+                <p className="text-xs font-medium text-foreground">{ins.title}</p>
+                <InsightBadge severity={ins.severity} text={`${ins.count}x`} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Timeline */}
+      <div className="px-4 py-4">
+        <h2 className="text-sm font-semibold text-muted-foreground mb-4">Health Timeline</h2>
+
+        {Object.entries(grouped).map(([dateLabel, dateLogs]) => (
+          <div key={dateLabel} className="mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-xs font-medium text-muted-foreground px-2">{dateLabel}</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+
+            <div className="space-y-3">
+              {dateLogs.map((log) => (
+                <div key={log.id} className="flex gap-3 fade-in">
+                  <div className="flex flex-col items-center">
+                    <div className={`h-2.5 w-2.5 rounded-full mt-1.5 ${
+                      log.type === "voice" ? "bg-accent" : "bg-primary"
+                    }`} />
+                    <div className="w-px flex-1 bg-border mt-1" />
+                  </div>
+                  <div className="glass-card rounded-xl p-3 flex-1 mb-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      {log.type === "voice" && <Mic className="h-3 w-3 text-accent" />}
+                      <span className="text-xs text-muted-foreground">
+                        {format(new Date(log.timestamp), "h:mm a")}
+                      </span>
+                    </div>
+                    <p className="text-sm text-foreground leading-relaxed">{log.text}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {logs.length === 0 && (
+          <div className="text-center py-16">
+            <p className="text-muted-foreground text-sm">No logs yet</p>
+            <p className="text-xs text-muted-foreground mt-1">Tap + to add the first observation</p>
+          </div>
+        )}
+      </div>
+
+      {/* FAB */}
+      <button
+        onClick={() => setShowAddLog(true)}
+        className="fixed bottom-6 right-6 h-14 w-14 rounded-full health-gradient shadow-lg flex items-center justify-center hover:scale-105 transition-transform"
+      >
+        <Plus className="h-6 w-6 text-primary-foreground" />
+      </button>
+
+      <AddLogDialog open={showAddLog} onClose={() => setShowAddLog(false)} memberId={member.id} />
+    </div>
+  );
+}
