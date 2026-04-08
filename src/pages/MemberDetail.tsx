@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
-import { ArrowLeft, Plus, Mic, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Mic, Sparkles, Trash2, FileText, AlertTriangle } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import AddLogDialog from "@/components/AddLogDialog";
@@ -20,8 +20,8 @@ const stagger = {
 };
 
 const fadeUp = {
-  hidden: { opacity: 0, y: 12 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
+  hidden: { opacity: 0, y: 14 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.22, 1, 0.36, 1] } },
 };
 
 export default function MemberDetail() {
@@ -31,12 +31,16 @@ export default function MemberDetail() {
   const [showAddLog, setShowAddLog] = useState(false);
 
   const member = members.find((m) => m.id === id);
-  if (!member) return <div className="p-6">Member not found</div>;
+  if (!member)
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Member not found</p>
+      </div>
+    );
 
   const logs = getLogsForMember(member.id);
   const insights = getInsightsForMember(member.id);
 
-  // Group logs by date
   const grouped: Record<string, typeof logs> = {};
   logs.forEach((log) => {
     const key = formatDateGroup(new Date(log.timestamp));
@@ -51,10 +55,10 @@ export default function MemberDetail() {
   };
 
   return (
-    <div className="min-h-screen bg-background pb-24">
+    <div className="min-h-screen bg-background pb-24 mesh-bg">
       {/* Header */}
       <motion.div
-        className="bg-card border-b border-border px-4 pt-12 pb-5"
+        className="bg-card/80 backdrop-blur-xl border-b border-border/40 px-5 pt-12 pb-6"
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
@@ -62,72 +66,82 @@ export default function MemberDetail() {
         <div className="flex items-center gap-3 mb-4">
           <motion.button
             onClick={() => navigate("/")}
-            className="text-muted-foreground hover:text-foreground p-1 rounded-lg hover:bg-muted transition-colors"
+            className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
             whileTap={{ scale: 0.9 }}
           >
             <ArrowLeft className="h-5 w-5" />
           </motion.button>
           <motion.div
-            className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center"
+            className="h-12 w-12 rounded-2xl health-gradient-soft flex items-center justify-center border border-primary/10"
             initial={{ scale: 0.8 }}
             animate={{ scale: 1 }}
             transition={{ type: "spring", stiffness: 300 }}
           >
-            <span className="text-primary font-bold">{member.name[0]}</span>
+            <span className="text-primary font-display font-bold text-lg">{member.name[0]}</span>
           </motion.div>
           <div className="flex-1">
-            <h1 className="font-bold text-foreground">{member.name}</h1>
-            <p className="text-xs text-muted-foreground">{member.age}y · {member.relationship}</p>
+            <h1 className="font-display font-bold text-foreground text-lg">{member.name}</h1>
+            <p className="text-xs text-muted-foreground">{member.age} years · {member.relationship}</p>
           </div>
           <motion.button
             onClick={handleRemove}
-            className="text-muted-foreground hover:text-destructive p-2 rounded-lg hover:bg-destructive/10 transition-colors"
+            className="text-muted-foreground hover:text-destructive p-2 rounded-xl hover:bg-destructive/10 transition-colors"
             whileTap={{ scale: 0.9 }}
           >
             <Trash2 className="h-4 w-4" />
           </motion.button>
         </div>
         {member.notes && (
-          <motion.p
-            className="text-xs text-muted-foreground bg-muted rounded-lg px-3 py-2"
+          <motion.div
+            className="text-xs text-muted-foreground bg-muted/60 rounded-xl px-4 py-3 border border-border/30"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2 }}
           >
-            📋 {member.notes}
-          </motion.p>
+            <span className="font-medium text-foreground/70">Medical Notes:</span> {member.notes}
+          </motion.div>
         )}
       </motion.div>
 
-      {/* Insights strip */}
+      {/* AI Insights strip */}
       <AnimatePresence>
         {insights.length > 0 && (
           <motion.div
-            className="px-4 py-3 bg-insight/5 border-b border-border"
+            className="px-5 py-4"
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
           >
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-3">
               <motion.div
-                animate={{ rotate: [0, 15, -15, 0] }}
-                transition={{ duration: 2, repeat: Infinity, repeatDelay: 4 }}
+                className="h-6 w-6 rounded-lg bg-insight/10 flex items-center justify-center"
+                animate={{ rotate: [0, 10, -10, 0] }}
+                transition={{ duration: 3, repeat: Infinity, repeatDelay: 3 }}
               >
-                <Sparkles className="h-4 w-4 text-insight" />
+                <Sparkles className="h-3.5 w-3.5 text-insight" />
               </motion.div>
-              <span className="text-xs font-semibold text-insight">AI Insights</span>
+              <span className="text-sm font-display font-semibold text-foreground">AI Insights</span>
+              <span className="text-xs text-muted-foreground">• Past 7 days</span>
             </div>
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-hide">
               {insights.map((ins, i) => (
                 <motion.div
                   key={ins.id}
-                  className="flex-shrink-0 bg-card rounded-lg border border-border px-3 py-2 max-w-[200px]"
-                  initial={{ opacity: 0, x: 20 }}
+                  className={`flex-shrink-0 glass-card rounded-xl px-4 py-3 max-w-[220px] border-l-2 ${
+                    ins.severity === "alert"
+                      ? "border-l-destructive"
+                      : ins.severity === "warning"
+                      ? "border-l-warning"
+                      : "border-l-primary"
+                  }`}
+                  initial={{ opacity: 0, x: 24 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.1 }}
+                  transition={{ delay: i * 0.08 }}
                 >
-                  <p className="text-xs font-medium text-foreground">{ins.title}</p>
-                  <InsightBadge severity={ins.severity} text={`${ins.count}x`} />
+                  <p className="text-xs font-medium text-foreground leading-snug">{ins.title}</p>
+                  <div className="mt-2">
+                    <InsightBadge severity={ins.severity} text={`${ins.count}× this week`} />
+                  </div>
                 </motion.div>
               ))}
             </div>
@@ -136,38 +150,46 @@ export default function MemberDetail() {
       </AnimatePresence>
 
       {/* Timeline */}
-      <div className="px-4 py-4">
-        <h2 className="text-sm font-semibold text-muted-foreground mb-4">Health Timeline</h2>
+      <div className="px-5 py-4">
+        <div className="flex items-center gap-2 mb-4">
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-display font-semibold text-foreground">Health Timeline</h2>
+          <span className="text-xs text-muted-foreground">({logs.length} entries)</span>
+        </div>
 
         {Object.entries(grouped).map(([dateLabel, dateLogs]) => (
           <div key={dateLabel} className="mb-6">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="h-px flex-1 bg-border" />
-              <span className="text-xs font-medium text-muted-foreground px-2">{dateLabel}</span>
-              <div className="h-px flex-1 bg-border" />
+            <div className="flex items-center gap-3 mb-3">
+              <div className="h-px flex-1 bg-border/50" />
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-2">{dateLabel}</span>
+              <div className="h-px flex-1 bg-border/50" />
             </div>
 
             <motion.div className="space-y-3" variants={stagger} initial="hidden" animate="show">
               {dateLogs.map((log) => (
                 <motion.div key={log.id} className="flex gap-3" variants={fadeUp}>
-                  <div className="flex flex-col items-center">
+                  <div className="flex flex-col items-center pt-1">
                     <motion.div
-                      className={`h-3 w-3 rounded-full mt-1.5 ${
+                      className={`h-3 w-3 rounded-full ring-4 ring-background ${
                         log.type === "voice" ? "bg-accent" : "bg-primary"
                       }`}
                       initial={{ scale: 0 }}
                       animate={{ scale: 1 }}
                       transition={{ type: "spring", stiffness: 400 }}
                     />
-                    <div className="w-px flex-1 bg-border mt-1" />
+                    <div className="w-px flex-1 bg-gradient-to-b from-border to-transparent mt-1" />
                   </div>
                   <motion.div
-                    className="glass-card rounded-xl p-3 flex-1 mb-1"
+                    className="glass-card rounded-2xl p-4 flex-1 mb-1"
                     whileHover={{ scale: 1.01 }}
                   >
-                    <div className="flex items-center gap-2 mb-1">
-                      {log.type === "voice" && <Mic className="h-3 w-3 text-accent" />}
-                      <span className="text-xs text-muted-foreground">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      {log.type === "voice" && (
+                        <div className="h-5 w-5 rounded-md bg-accent/10 flex items-center justify-center">
+                          <Mic className="h-3 w-3 text-accent" />
+                        </div>
+                      )}
+                      <span className="text-[11px] text-muted-foreground font-medium">
                         {format(new Date(log.timestamp), "h:mm a")}
                       </span>
                     </div>
@@ -181,12 +203,15 @@ export default function MemberDetail() {
 
         {logs.length === 0 && (
           <motion.div
-            className="text-center py-16"
+            className="text-center py-20 glass-card rounded-2xl"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
           >
-            <p className="text-muted-foreground text-sm">No logs yet</p>
+            <div className="h-14 w-14 rounded-2xl bg-muted mx-auto mb-4 flex items-center justify-center">
+              <FileText className="h-6 w-6 text-muted-foreground/40" />
+            </div>
+            <p className="text-foreground font-display font-semibold">No logs yet</p>
             <p className="text-xs text-muted-foreground mt-1">Tap + to add the first observation</p>
           </motion.div>
         )}
@@ -195,7 +220,7 @@ export default function MemberDetail() {
       {/* FAB */}
       <motion.button
         onClick={() => setShowAddLog(true)}
-        className="fixed bottom-6 right-6 h-14 w-14 rounded-full health-gradient shadow-lg flex items-center justify-center z-50"
+        className="fixed bottom-6 right-6 h-14 w-14 rounded-2xl health-gradient shadow-glow-lg flex items-center justify-center z-50"
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.9 }}
         initial={{ scale: 0, rotate: -180 }}

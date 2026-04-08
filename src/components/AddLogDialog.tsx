@@ -3,7 +3,7 @@ import { useApp } from "@/context/AppContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, MicOff, Send, Lightbulb } from "lucide-react";
+import { Mic, MicOff, Send, Lightbulb, Zap } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 
@@ -60,11 +60,19 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-sm mx-auto">
+      <DialogContent className="max-w-sm mx-auto rounded-2xl border-border/40 bg-card/95 backdrop-blur-xl">
         <DialogHeader>
-          <DialogTitle>Log for {member?.name || "Member"}</DialogTitle>
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl health-gradient-soft flex items-center justify-center border border-primary/10">
+              <span className="text-primary font-display font-bold text-sm">{member?.name?.[0] || "?"}</span>
+            </div>
+            <div>
+              <DialogTitle className="font-display">Log for {member?.name || "Member"}</DialogTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Record a health observation</p>
+            </div>
+          </div>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="space-y-4 mt-2">
           <Textarea
             placeholder="What did you observe? (e.g., 'Dad complained about chest tightness after dinner')"
             value={text}
@@ -73,7 +81,7 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
               if (e.target.value) setShowSuggestions(false);
             }}
             rows={4}
-            className="resize-none"
+            className="resize-none rounded-xl border-border/50 bg-background/60 focus:border-primary/40 focus:ring-primary/20"
           />
 
           {/* Quick suggestions */}
@@ -85,17 +93,20 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
                 exit={{ opacity: 0, height: 0 }}
                 className="overflow-hidden"
               >
-                <div className="flex items-center gap-1.5 mb-2">
-                  <Lightbulb className="h-3 w-3 text-warning" />
-                  <span className="text-xs text-muted-foreground">Quick suggestions</span>
+                <div className="flex items-center gap-1.5 mb-2.5">
+                  <Zap className="h-3 w-3 text-warning" />
+                  <span className="text-xs text-muted-foreground font-medium">Quick suggestions</span>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  {suggestions.map((s) => (
+                  {suggestions.map((s, i) => (
                     <motion.button
                       key={s}
                       type="button"
                       onClick={() => handleSuggestionClick(s)}
-                      className="text-xs px-2.5 py-1.5 rounded-full bg-muted text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors border border-border"
+                      className="text-xs px-3 py-1.5 rounded-xl bg-muted/60 text-muted-foreground hover:bg-primary/10 hover:text-primary transition-all border border-border/40 hover:border-primary/20"
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: i * 0.04 }}
                       whileTap={{ scale: 0.95 }}
                     >
                       {s}
@@ -106,13 +117,13 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
             )}
           </AnimatePresence>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2.5">
             <motion.div whileTap={{ scale: 0.95 }}>
               <Button
                 type="button"
                 variant={isRecording ? "destructive" : "outline"}
                 onClick={handleVoiceMock}
-                className="gap-2"
+                className="gap-2 rounded-xl"
               >
                 {isRecording ? (
                   <>
@@ -129,7 +140,7 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
               <Button
                 onClick={handleSubmit}
                 disabled={!text.trim()}
-                className="w-full gap-2 health-gradient border-0"
+                className="w-full gap-2 health-gradient border-0 rounded-xl shadow-glow"
               >
                 <Send className="h-4 w-4" /> Save Log
               </Button>
@@ -139,23 +150,23 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
           <AnimatePresence>
             {isRecording && (
               <motion.div
-                className="flex items-center gap-2 text-destructive text-sm"
+                className="flex items-center gap-2.5 text-destructive text-sm bg-destructive/5 rounded-xl p-3 border border-destructive/10"
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
               >
                 <motion.div
-                  className="h-2 w-2 rounded-full bg-destructive"
+                  className="h-2.5 w-2.5 rounded-full bg-destructive"
                   animate={{ opacity: [1, 0.3, 1] }}
                   transition={{ duration: 1, repeat: Infinity }}
                 />
-                Recording... (mock — tap Stop to add sample text)
+                <span className="text-xs">Recording... tap Stop to convert to text</span>
               </motion.div>
             )}
           </AnimatePresence>
 
-          <p className="text-xs text-muted-foreground">
-            💡 Be specific: mention symptoms, time, activities, and how they felt.
+          <p className="text-[11px] text-muted-foreground bg-muted/40 rounded-xl px-3 py-2.5 leading-relaxed">
+            💡 <span className="font-medium">Tip:</span> Be specific — mention symptoms, time, activities, and how they felt for better AI analysis.
           </p>
         </div>
       </DialogContent>
