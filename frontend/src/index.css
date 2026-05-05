@@ -1,0 +1,375 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 36 22% 97%;
+    --foreground: 170 24% 14%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 170 24% 14%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 170 24% 14%;
+
+    --primary: 169 62% 38%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 158 24% 93%;
+    --secondary-foreground: 170 28% 26%;
+
+    --muted: 36 12% 93%;
+    --muted-foreground: 168 8% 44%;
+
+    --accent: 8 79% 60%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 4 72% 56%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 34 14% 88%;
+    --input: 34 14% 88%;
+    --ring: 169 62% 38%;
+
+    --radius: 1rem;
+
+    --warning: 37 90% 56%;
+    --warning-foreground: 28 35% 16%;
+
+    --success: 162 58% 46%;
+    --success-foreground: 0 0% 100%;
+
+    --insight: 251 54% 56%;
+    --insight-foreground: 0 0% 100%;
+
+    --health-start: 158 64% 27%;
+    --health-end: 171 60% 30%;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 220 25% 7%;
+    --foreground: 210 20% 95%;
+    --card: 220 25% 10%;
+    --card-foreground: 210 20% 95%;
+    --popover: 220 25% 10%;
+    --popover-foreground: 210 20% 95%;
+    --primary: 199 89% 52%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 20% 16%;
+    --secondary-foreground: 210 20% 85%;
+    --muted: 220 15% 16%;
+    --muted-foreground: 215 15% 55%;
+    --accent: 162 63% 45%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 4 62% 40%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 220 15% 18%;
+    --input: 220 15% 18%;
+    --ring: 199 89% 52%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+  }
+
+  .glass-card {
+    @apply bg-card/90 backdrop-blur-xl border border-border/70 shadow-sm;
+  }
+
+  .glass-card-hover {
+    @apply glass-card transition-all duration-300;
+  }
+
+  .glass-card-hover:hover {
+    @apply shadow-lg border-primary/20;
+    transform: translateY(-2px);
+  }
+
+  .health-gradient {
+    background: linear-gradient(135deg, hsl(158, 64%, 27%) 0%, hsl(171, 60%, 30%) 100%);
+  }
+
+  .health-gradient-soft {
+    background: linear-gradient(135deg, hsl(158, 64%, 27%, 0.1) 0%, hsl(171, 60%, 30%, 0.1) 100%);
+  }
+
+  .health-gradient-text {
+    background: linear-gradient(135deg, hsl(158, 64%, 27%) 0%, hsl(171, 60%, 30%) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .insight-gradient {
+    background: linear-gradient(135deg, hsl(251, 54%, 56%) 0%, hsl(265, 52%, 62%) 100%);
+  }
+
+  .warm-gradient {
+    background: linear-gradient(135deg, hsl(37, 90%, 56%) 0%, hsl(8, 79%, 60%) 100%);
+  }
+
+  .mesh-bg {
+    background-image:
+      radial-gradient(at 40% 20%, hsl(158, 64%, 27%, 0.07) 0px, transparent 55%),
+      radial-gradient(at 80% 0%, hsl(171, 60%, 30%, 0.06) 0px, transparent 50%),
+      radial-gradient(at 0% 50%, hsl(251, 54%, 56%, 0.04) 0px, transparent 50%),
+      radial-gradient(at 80% 50%, hsl(37, 90%, 56%, 0.04) 0px, transparent 48%),
+      radial-gradient(at 0% 100%, hsl(8, 79%, 60%, 0.04) 0px, transparent 50%);
+  }
+
+  .app-shell {
+    @apply min-h-screen w-full mx-auto relative overflow-hidden;
+    max-width: 420px;
+    box-shadow: 0 0 0 1px hsl(var(--border) / 0.4);
+    background: hsl(var(--background));
+  }
+
+  .app-safe-bottom {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
+
+  .organic-orb {
+    position: absolute;
+    border-radius: 9999px;
+    background: hsl(0 0% 100% / 0.06);
+  }
+
+  .doc-stack {
+    position: relative;
+    width: 88px;
+    height: 70px;
+    margin: 0 auto;
+  }
+
+  .doc-stack span {
+    position: absolute;
+    inset: 0;
+    border-radius: 14px;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+  }
+
+  .doc-stack span:nth-child(1) {
+    transform: translate(-8px, 8px);
+    opacity: 0.55;
+  }
+
+  .doc-stack span:nth-child(2) {
+    transform: translate(6px, 4px);
+    opacity: 0.75;
+  }
+
+  .doc-stack span:nth-child(3) {
+    display: grid;
+    place-content: center;
+    transform: translate(0, 0);
+  }
+
+  .mini-bars {
+    @apply flex items-end justify-center gap-1.5 h-12;
+  }
+
+  .mini-bars span {
+    @apply block w-2 rounded-full;
+    background: hsl(var(--insight) / 0.35);
+    animation: grow-bar 1.8s ease-in-out infinite;
+  }
+
+  .mini-bars span:nth-child(1) { height: 35%; animation-delay: 0.1s; }
+  .mini-bars span:nth-child(2) { height: 70%; animation-delay: 0.2s; }
+  .mini-bars span:nth-child(3) { height: 48%; animation-delay: 0.3s; }
+  .mini-bars span:nth-child(4) { height: 82%; animation-delay: 0.4s; }
+
+  @keyframes grow-bar {
+    0%, 100% { transform: scaleY(0.85); }
+    50% { transform: scaleY(1); }
+  }
+
+  .dialog-sheet {
+    @apply border-0 rounded-t-[1.75rem] rounded-b-none p-5 pb-7;
+    background: hsl(var(--card));
+    top: auto !important;
+    left: 50% !important;
+    bottom: 0 !important;
+    transform: translate(-50%, 0) !important;
+    max-height: min(80vh, 720px);
+    overflow-y: auto;
+    width: min(460px, 100vw) !important;
+  }
+
+  .dialog-backdrop {
+    background: linear-gradient(180deg, hsl(170 30% 8% / 0.2) 0%, hsl(170 30% 8% / 0.6) 100%);
+  }
+
+  .transition-soft {
+    @apply transition-all duration-300 ease-out;
+  }
+
+  .dock-shell {
+    @apply fixed bottom-0 left-0 right-0 bg-card/90 backdrop-blur-xl border-t border-border/60 px-6 py-3 flex justify-around z-50;
+    max-width: 420px;
+    margin: 0 auto;
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  }
+
+  .dock-item {
+    @apply flex flex-col items-center gap-1 relative py-1 transition-soft;
+  }
+
+  .dock-item-idle {
+    @apply text-muted-foreground;
+  }
+
+  .dock-item-active {
+    color: hsl(var(--primary));
+  }
+
+  .dock-icon {
+    @apply h-8 w-8 rounded-xl flex items-center justify-center relative transition-soft;
+  }
+
+  .dock-icon-active {
+    background: hsl(var(--primary) / 0.12);
+  }
+
+  .dock-label {
+    @apply text-[10px] font-medium;
+  }
+
+  .dock-item-active .dock-label {
+    @apply font-semibold;
+  }
+
+  .dock-badge {
+    @apply absolute -top-1 -right-1 h-4 min-w-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center px-1;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .fab-above-dock {
+    bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
+
+  @media (max-width: 640px) {
+    .app-shell {
+      max-width: 100%;
+      box-shadow: none;
+    }
+
+    .dock-shell {
+      max-width: 100%;
+    }
+  }
+
+  @media (min-width: 641px) and (max-width: 1024px) {
+    .app-shell {
+      max-width: 640px;
+      border-radius: 22px;
+      margin-top: 20px;
+      margin-bottom: 20px;
+      box-shadow:
+        0 18px 40px hsl(170 22% 14% / 0.12),
+        0 0 0 1px hsl(var(--border) / 0.35);
+    }
+
+    .dock-shell {
+      max-width: 640px;
+      border-radius: 0 0 22px 22px;
+      border-left: 1px solid hsl(var(--border) / 0.55);
+      border-right: 1px solid hsl(var(--border) / 0.55);
+    }
+  }
+
+  @media (min-width: 1025px) {
+    .app-shell {
+      max-width: 860px;
+      border-radius: 26px;
+      margin-top: 26px;
+      margin-bottom: 26px;
+      box-shadow:
+        0 26px 56px hsl(170 22% 14% / 0.14),
+        0 0 0 1px hsl(var(--border) / 0.35);
+    }
+
+    .dock-shell {
+      max-width: 860px;
+      border-radius: 0 0 26px 26px;
+      border-left: 1px solid hsl(var(--border) / 0.55);
+      border-right: 1px solid hsl(var(--border) / 0.55);
+    }
+  }
+
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 0%,
+      hsl(var(--background)) 50%,
+      hsl(var(--muted)) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .pulse-ring {
+    animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes pulse-ring {
+    0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.3); }
+    50% { box-shadow: 0 0 0 8px hsl(var(--primary) / 0); }
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

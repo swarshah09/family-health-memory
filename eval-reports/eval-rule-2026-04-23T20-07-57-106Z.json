@@ -1,0 +1,14 @@
+{
+  "createdAt": "2026-04-23T20:07:57.106Z",
+  "datasetPath": "/Users/swarshah/Downloads/healthlens_dataset_500_messy.json",
+  "mode": "rule",
+  "size": 500,
+  "metrics": {
+    "symptomExactAccuracy": 1,
+    "symptomF1Avg": 1,
+    "severityAccuracy": 1,
+    "urgencyAccuracy": 1
+  },
+  "failureCount": 0,
+  "failures": []
+}

@@ -1,0 +1,781 @@
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useApp } from "@/context/AppContext";
+import {
+  ArrowLeft,
+  Bell,
+  ClipboardList,
+  Cog,
+  Crown,
+  Download,
+  FileSearch,
+  Plus,
+  PlayCircle,
+  Shield,
+  Users
+} from "lucide-react";
+import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+
+type NotificationItem = {
+  id: string;
+  memberId: string;
+  message: string;
+  severity: "info" | "warning" | "alert";
+  isRead: boolean;
+  createdAt: string;
+};
+
+export default function AdminPage() {
+  const navigate = useNavigate();
+  const {
+    user,
+    members,
+    logs,
+    familyUsers,
+    loadFamilyUsers,
+    inviteFamilyUser,
+    updateFamilyUserRole,
+    addMember,
+    removeMember,
+    refreshFamilyData
+  } = useApp();
+  const token = localStorage.getItem("fhm_access_token");
+  const [inviteName, setInviteName] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"caregiver" | "viewer">("viewer");
+  const [memberName, setMemberName] = useState("");
+  const [memberAge, setMemberAge] = useState("");
+  const [memberRelation, setMemberRelation] = useState("");
+  const [memberNotes, setMemberNotes] = useState("");
+  const [status, setStatus] = useState<{
+    lastRunAt: string | null;
+    lastRunStatus: "success" | "failed" | null;
+    insightsGenerated: number;
+    notificationsCreated: number;
+  } | null>(null);
+  const [settings, setSettings] = useState<{
+    minMentions: number;
+    minConfidence: number;
+    notificationsEnabled: boolean;
+  } | null>(null);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [activeTab, setActiveTab] = useState<"overview" | "team" | "members" | "alerts" | "audit">("overview");
+  const [teamQuery, setTeamQuery] = useState("");
+  const [memberQuery, setMemberQuery] = useState("");
+  const [alertQuery, setAlertQuery] = useState("");
+  const [auditAction, setAuditAction] = useState("");
+  const [auditActorEmail, setAuditActorEmail] = useState("");
+  const [auditFrom, setAuditFrom] = useState("");
+  const [auditTo, setAuditTo] = useState("");
+  const [auditOffset, setAuditOffset] = useState(0);
+  const [auditLimit] = useState(40);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditRows, setAuditRows] = useState<
+    Array<{
+      id: string;
+      actorEmail: string;
+      action: string;
+      targetType: string;
+      targetId?: string;
+      metadata: Record<string, unknown>;
+      createdAt: string;
+    }>
+  >([]);
+
+  const latestLogs = useMemo(
+    () => [...logs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 8),
+    [logs]
+  );
+
+  const memberNameById = useMemo(
+    () => new Map(members.map((m) => [m.id, m.name])),
+    [members]
+  );
+
+  const fetchAutomation = async () => {
+    if (!user || !token) return;
+    const headers = { Authorization: `Bearer ${token}` };
+    const [statusRes, notifRes] = await Promise.all([
+      fetch(`${API_BASE_URL}/api/families/${user.familyId}/automation/status`, { headers }),
+      fetch(`${API_BASE_URL}/api/families/${user.familyId}/notifications`, { headers })
+    ]);
+    if (statusRes.ok) {
+      const statusJson = await statusRes.json();
+      setStatus(statusJson.status || null);
+      setSettings(statusJson.settings || null);
+    }
+    if (notifRes.ok) {
+      const notifJson = await notifRes.json();
+      setNotifications(notifJson.notifications || []);
+    }
+  };
+
+  const toIsoOrNull = (v: string): string | null => {
+    if (!v.trim()) return null;
+    const dt = new Date(v);
+    if (Number.isNaN(dt.getTime())) return null;
+    return dt.toISOString();
+  };
+
+  const fetchAuditLogs = async (offset = 0) => {
+    if (!user || !token) return;
+    const params = new URLSearchParams({ limit: String(auditLimit), offset: String(offset) });
+    if (auditAction.trim()) params.set("action", auditAction.trim());
+    if (auditActorEmail.trim()) params.set("actorEmail", auditActorEmail.trim());
+    const fromIso = toIsoOrNull(auditFrom);
+    const toIso = toIsoOrNull(auditTo);
+    if (fromIso) params.set("from", fromIso);
+    if (toIso) params.set("to", toIso);
+    const response = await fetch(
+      `${API_BASE_URL}/api/families/${user.familyId}/audit-logs?${params.toString()}`,
+      {
+        headers: { Authorization: `Bearer ${token}` }
+      }
+    );
+    if (!response.ok) {
+      toast.error("Failed to load audit logs");
+      return;
+    }
+    const json = await response.json();
+    setAuditRows(json.auditLogs || []);
+    setAuditTotal(Number(json.total || 0));
+    setAuditOffset(Number(json.offset || 0));
+  };
+
+  const exportCsv = (filename: string, rows: Array<Record<string, unknown>>) => {
+    if (!rows.length) {
+      toast.error("Nothing to export");
+      return;
+    }
+    const keys = Object.keys(rows[0]);
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = [keys.join(","), ...rows.map((r) => keys.map((k) => esc(r[k])).join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    loadFamilyUsers().catch(() => {});
+    fetchAutomation().catch(() => {});
+  }, [user?.familyId]);
+
+  useEffect(() => {
+    if (activeTab !== "audit") return;
+    fetchAuditLogs(auditOffset).catch(() => {});
+  }, [activeTab]);
+
+  if (user?.role !== "owner") {
+    return (
+      <div className="app-shell app-safe-bottom">
+        <div className="px-5 pt-14">
+          <Button variant="outline" onClick={() => navigate("/")}>
+            <ArrowLeft className="h-4 w-4 mr-2" /> Back
+          </Button>
+          <div className="glass-card rounded-2xl p-5 mt-4">
+            <p className="text-base font-semibold text-foreground">Owner-only console</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              This admin page can only be accessed by the family owner account.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const runNow = async () => {
+    if (!user || !token) return;
+    const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/automation/run`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!response.ok) {
+      toast.error("Failed to run automation");
+      return;
+    }
+    toast.success("Automation run completed");
+    await refreshFamilyData();
+    await fetchAutomation();
+  };
+
+  const saveSettings = async () => {
+    if (!user || !token || !settings) return;
+    const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/automation/settings`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(settings)
+    });
+    if (!response.ok) {
+      toast.error("Failed to save thresholds");
+      return;
+    }
+    toast.success("Threshold settings updated");
+    await fetchAutomation();
+  };
+
+  const markRead = async (notificationId: string) => {
+    if (!user || !token) return;
+    const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/notifications/${notificationId}/read`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!response.ok) return;
+    setNotifications((prev) => prev.map((n) => (n.id === notificationId ? { ...n, isRead: true } : n)));
+  };
+
+  const filteredUsers = useMemo(() => {
+    const q = teamQuery.trim().toLowerCase();
+    if (!q) return familyUsers;
+    return familyUsers.filter(
+      (u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.role.includes(q)
+    );
+  }, [familyUsers, teamQuery]);
+
+  const filteredMembers = useMemo(() => {
+    const q = memberQuery.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter(
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        m.relationship.toLowerCase().includes(q) ||
+        (m.notes || "").toLowerCase().includes(q)
+    );
+  }, [members, memberQuery]);
+
+  const filteredNotifications = useMemo(() => {
+    const q = alertQuery.trim().toLowerCase();
+    if (!q) return notifications;
+    return notifications.filter((n) => n.message.toLowerCase().includes(q) || n.severity.includes(q));
+  }, [notifications, alertQuery]);
+
+  return (
+    <div className="app-shell app-safe-bottom bg-[#151412] text-white">
+      <div className="bg-[#1d1a18] border-b border-white/10 px-5 pt-12 pb-6">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate("/")}
+            className="text-white/60 hover:text-white p-2 rounded-xl hover:bg-white/10 transition-colors"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div className="h-8 w-8 rounded-xl bg-warning/20 flex items-center justify-center">
+            <Crown className="h-4 w-4 text-warning" />
+          </div>
+          <div>
+            <h1 className="font-display font-bold text-white text-lg">Admin Console</h1>
+            <p className="text-[11px] text-white/55">Owner controls for family operations</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-5 py-5 space-y-4">
+        <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-2">
+          <div className="grid grid-cols-5 gap-2">
+            {[
+              { id: "overview", label: "Overview" },
+              { id: "team", label: "Team" },
+              { id: "members", label: "Members" },
+              { id: "alerts", label: "Alerts" },
+              { id: "audit", label: "Audit" }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id as typeof activeTab)}
+                className={`h-9 rounded-xl text-xs font-medium transition-colors ${
+                  activeTab === tab.id ? "bg-success text-success-foreground" : "bg-black/10 text-white/70"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {activeTab === "overview" && (
+          <>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-3">
+            <p className="text-[11px] text-white/55">Members</p>
+            <p className="text-xl font-semibold">{members.length}</p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-3">
+            <p className="text-[11px] text-white/55">Team users</p>
+            <p className="text-xl font-semibold">{familyUsers.length}</p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-3">
+            <p className="text-[11px] text-white/55">Logs</p>
+            <p className="text-xl font-semibold">{logs.length}</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <Cog className="h-4 w-4 text-success" />
+            <p className="text-sm font-semibold">Automation</p>
+          </div>
+          <p className="text-xs text-white/60">
+            Last run: {status?.lastRunAt ? new Date(status.lastRunAt).toLocaleString() : "Never"} | Result:{" "}
+            {status?.lastRunStatus || "N/A"} | Insights: {status?.insightsGenerated || 0} | Notifications:{" "}
+            {status?.notificationsCreated || 0}
+          </p>
+          <Button onClick={runNow} className="h-9 rounded-xl bg-success hover:bg-success/90">
+            <PlayCircle className="h-4 w-4 mr-2" /> Run analysis now
+          </Button>
+          {settings && (
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div>
+                <p className="text-xs text-white/55 mb-1">Min mentions</p>
+                <Input
+                  type="number"
+                  value={settings.minMentions}
+                  onChange={(e) =>
+                    setSettings((prev) =>
+                      prev ? { ...prev, minMentions: Number(e.target.value || "3") } : prev
+                    )
+                  }
+                />
+              </div>
+              <div>
+                <p className="text-xs text-white/55 mb-1">Min confidence</p>
+                <Input
+                  type="number"
+                  step="0.05"
+                  value={settings.minConfidence}
+                  onChange={(e) =>
+                    setSettings((prev) =>
+                      prev ? { ...prev, minConfidence: Number(e.target.value || "0.7") } : prev
+                    )
+                  }
+                />
+              </div>
+              <div className="col-span-2 flex items-center justify-between text-sm">
+                <span>Pain alerts</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSettings((prev) =>
+                      prev ? { ...prev, notificationsEnabled: !prev.notificationsEnabled } : prev
+                    )
+                  }
+                  className={`h-7 w-12 rounded-full p-1 transition-soft ${
+                    settings.notificationsEnabled ? "bg-success" : "bg-white/20"
+                  }`}
+                >
+                  <span
+                    className={`block h-5 w-5 rounded-full bg-white transition-soft ${
+                      settings.notificationsEnabled ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+              <div className="col-span-2">
+                <Button onClick={saveSettings} className="h-9 rounded-xl">
+                  Save thresholds
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+            <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4">
+              <p className="text-sm font-semibold mb-2">Recent log activity</p>
+              <div className="space-y-2">
+                {latestLogs.map((l) => (
+                  <div key={l.id} className="rounded-lg border border-white/10 p-2.5">
+                    <p className="text-xs text-white/50">
+                      {new Date(l.timestamp).toLocaleString()} · {memberNameById.get(l.memberId) || "Unknown"}
+                    </p>
+                    <p className="text-sm mt-1 line-clamp-2">{l.text}</p>
+                  </div>
+                ))}
+                {latestLogs.length === 0 && <p className="text-xs text-white/50">No logs yet.</p>}
+              </div>
+            </div>
+          </>
+        )}
+
+        {activeTab === "team" && (
+          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-primary" />
+            <p className="text-sm font-semibold">Team & roles</p>
+          </div>
+          <div className="flex gap-2">
+            <Input
+              placeholder="Search users by name, email, role"
+              value={teamQuery}
+              onChange={(e) => setTeamQuery(e.target.value)}
+            />
+            <Button
+              variant="outline"
+              onClick={() =>
+                exportCsv(
+                  "family-users.csv",
+                  filteredUsers.map((u) => ({ name: u.name, email: u.email, role: u.role }))
+                )
+              }
+            >
+              <Download className="h-4 w-4 mr-2" /> Export
+            </Button>
+          </div>
+          <div className="grid grid-cols-1 gap-2.5">
+            <Input placeholder="Name" value={inviteName} onChange={(e) => setInviteName(e.target.value)} />
+            <Input
+              placeholder="Email"
+              type="email"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+            />
+            <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as "caregiver" | "viewer")}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="caregiver">Caregiver</SelectItem>
+                <SelectItem value="viewer">Viewer</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              onClick={() => {
+                if (!inviteName.trim() || !inviteEmail.trim()) {
+                  toast.error("Name and email are required");
+                  return;
+                }
+                inviteFamilyUser(inviteEmail.trim(), inviteName.trim(), inviteRole)
+                  .then((result) => {
+                    setInviteName("");
+                    setInviteEmail("");
+                    toast.success("User invited", {
+                      description: result.temporaryPassword
+                        ? `Temporary password: ${result.temporaryPassword}`
+                        : "Existing family user updated."
+                    });
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Invite failed"));
+              }}
+            >
+              <Plus className="h-4 w-4 mr-2" /> Invite user
+            </Button>
+          </div>
+          <div className="space-y-2">
+            {filteredUsers.map((u) => (
+              <div key={u.id} className="rounded-xl border border-white/10 p-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">{u.name}</p>
+                  <p className="text-xs text-white/55">{u.email}</p>
+                </div>
+                <Select
+                  value={u.role}
+                  onValueChange={(value) =>
+                    (() => {
+                      const nextRole = value as "owner" | "caregiver" | "viewer";
+                      const ownerSensitive = u.role === "owner" || nextRole === "owner";
+                      if (ownerSensitive) {
+                        const confirmed = window.confirm(
+                          `Confirm owner-level role change for ${u.name}. You must verify with your password.`
+                        );
+                        if (!confirmed) return;
+                        const currentPassword = window.prompt("Enter your current account password:");
+                        if (!currentPassword) return;
+                        updateFamilyUserRole(u.id, nextRole, currentPassword)
+                          .then(() => toast.success(`Updated role for ${u.name}`))
+                          .catch((err: Error) => toast.error(err.message || "Role update failed"));
+                        return;
+                      }
+                      updateFamilyUserRole(u.id, nextRole)
+                        .then(() => toast.success(`Updated role for ${u.name}`))
+                        .catch((err: Error) => toast.error(err.message || "Role update failed"));
+                    })()
+                  }
+                >
+                  <SelectTrigger className="w-[140px] h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="owner">Owner</SelectItem>
+                    <SelectItem value="caregiver">Caregiver</SelectItem>
+                    <SelectItem value="viewer">Viewer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+          </div>
+        )}
+
+        {activeTab === "members" && (
+          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Shield className="h-4 w-4 text-warning" />
+            <p className="text-sm font-semibold">Member management</p>
+          </div>
+          <div className="flex gap-2">
+            <Input
+              placeholder="Search members by name, relationship, notes"
+              value={memberQuery}
+              onChange={(e) => setMemberQuery(e.target.value)}
+            />
+            <Button
+              variant="outline"
+              onClick={() =>
+                exportCsv(
+                  "family-members.csv",
+                  filteredMembers.map((m) => ({
+                    name: m.name,
+                    age: m.age,
+                    relationship: m.relationship,
+                    notes: m.notes || ""
+                  }))
+                )
+              }
+            >
+              <Download className="h-4 w-4 mr-2" /> Export
+            </Button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Input
+              placeholder="Member name"
+              value={memberName}
+              onChange={(e) => setMemberName(e.target.value)}
+              className="col-span-2"
+            />
+            <Input
+              placeholder="Age"
+              type="number"
+              value={memberAge}
+              onChange={(e) => setMemberAge(e.target.value)}
+            />
+            <Input
+              placeholder="Relationship"
+              value={memberRelation}
+              onChange={(e) => setMemberRelation(e.target.value)}
+            />
+            <Input
+              placeholder="Notes (optional)"
+              value={memberNotes}
+              onChange={(e) => setMemberNotes(e.target.value)}
+              className="col-span-2"
+            />
+            <Button
+              className="col-span-2"
+              onClick={() => {
+                const age = Number(memberAge);
+                if (!memberName.trim() || !memberRelation.trim() || !Number.isFinite(age) || age <= 0) {
+                  toast.error("Provide valid name, age and relationship");
+                  return;
+                }
+                addMember({
+                  name: memberName.trim(),
+                  age,
+                  relationship: memberRelation.trim(),
+                  notes: memberNotes.trim() || undefined
+                })
+                  .then(() => {
+                    setMemberName("");
+                    setMemberAge("");
+                    setMemberRelation("");
+                    setMemberNotes("");
+                    toast.success("Member added");
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Failed to add member"));
+              }}
+            >
+              <Plus className="h-4 w-4 mr-2" /> Add member
+            </Button>
+          </div>
+          <div className="space-y-2">
+            {filteredMembers.map((m) => (
+              <div key={m.id} className="rounded-xl border border-white/10 p-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">
+                    {m.name} ({m.age})
+                  </p>
+                  <p className="text-xs text-white/55">{m.relationship}</p>
+                </div>
+                <Button
+                  variant="destructive"
+                  className="h-8"
+                  onClick={() => {
+                    const confirmed = window.confirm(
+                      `Delete ${m.name}? This also deletes all of their logs and cannot be undone.`
+                    );
+                    if (!confirmed) return;
+                    removeMember(m.id)
+                      .then(() => toast.success(`Removed ${m.name}`))
+                      .catch((err: Error) => toast.error(err.message || "Could not remove member"));
+                  }}
+                >
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </div>
+          </div>
+        )}
+
+        {activeTab === "alerts" && (
+          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Bell className="h-4 w-4 text-warning" />
+            <p className="text-sm font-semibold">Latest notifications</p>
+          </div>
+          <div className="flex gap-2 mb-3">
+            <Input
+              placeholder="Search alerts by message or severity"
+              value={alertQuery}
+              onChange={(e) => setAlertQuery(e.target.value)}
+            />
+            <Button
+              variant="outline"
+              onClick={() =>
+                exportCsv(
+                  "alerts.csv",
+                  filteredNotifications.map((n) => ({
+                    createdAt: n.createdAt,
+                    severity: n.severity,
+                    isRead: n.isRead,
+                    message: n.message
+                  }))
+                )
+              }
+            >
+              <Download className="h-4 w-4 mr-2" /> Export
+            </Button>
+          </div>
+          <div className="space-y-2.5">
+            {filteredNotifications.map((n) => (
+              <button
+                key={n.id}
+                onClick={() => markRead(n.id)}
+                className={`w-full text-left rounded-xl p-3 border ${
+                  n.isRead ? "border-white/10 bg-black/10" : "border-success/30 bg-success/10"
+                }`}
+              >
+                <p className="text-xs text-white/50">
+                  {new Date(n.createdAt).toLocaleString()} · {n.severity}
+                </p>
+                <p className="text-sm mt-1">{n.message}</p>
+              </button>
+            ))}
+            {filteredNotifications.length === 0 && <p className="text-xs text-white/50">No notifications found.</p>}
+          </div>
+          </div>
+        )}
+
+        {activeTab === "audit" && (
+          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <ClipboardList className="h-4 w-4 text-warning" />
+              <p className="text-sm font-semibold">Audit log viewer</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-3">
+              <Input
+                placeholder="Filter by action (e.g. member.create)"
+                value={auditAction}
+                onChange={(e) => setAuditAction(e.target.value)}
+              />
+              <Input
+                placeholder="Filter by actor email"
+                value={auditActorEmail}
+                onChange={(e) => setAuditActorEmail(e.target.value)}
+              />
+              <Input
+                type="datetime-local"
+                value={auditFrom}
+                onChange={(e) => setAuditFrom(e.target.value)}
+              />
+              <Input
+                type="datetime-local"
+                value={auditTo}
+                onChange={(e) => setAuditTo(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setAuditOffset(0);
+                    fetchAuditLogs(0);
+                  }}
+                >
+                  <FileSearch className="h-4 w-4 mr-2" /> Apply
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    exportCsv(
+                      "audit-logs.csv",
+                      auditRows.map((r) => ({
+                        createdAt: r.createdAt,
+                        actorEmail: r.actorEmail,
+                        action: r.action,
+                        targetType: r.targetType,
+                        targetId: r.targetId || "",
+                        metadata: JSON.stringify(r.metadata || {})
+                      }))
+                    )
+                  }
+                >
+                  <Download className="h-4 w-4 mr-2" /> Export
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {auditRows.map((r) => (
+                <div key={r.id} className="rounded-lg border border-white/10 p-3">
+                  <p className="text-xs text-white/50">
+                    {new Date(r.createdAt).toLocaleString()} · {r.actorEmail}
+                  </p>
+                  <p className="text-sm mt-1">
+                    <span className="font-medium">{r.action}</span> on {r.targetType}
+                    {r.targetId ? ` (${r.targetId})` : ""}
+                  </p>
+                  {Object.keys(r.metadata || {}).length > 0 ? (
+                    <p className="text-xs text-white/55 mt-1 line-clamp-2">
+                      metadata: {JSON.stringify(r.metadata)}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+              {auditRows.length === 0 && <p className="text-xs text-white/50">No audit records found.</p>}
+            </div>
+            <div className="flex items-center justify-between mt-3">
+              <p className="text-xs text-white/50">
+                Showing {auditRows.length ? auditOffset + 1 : 0}-
+                {Math.min(auditOffset + auditRows.length, auditTotal)} of {auditTotal}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  disabled={auditOffset === 0}
+                  onClick={() => {
+                    const next = Math.max(auditOffset - auditLimit, 0);
+                    fetchAuditLogs(next);
+                  }}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={auditOffset + auditRows.length >= auditTotal}
+                  onClick={() => fetchAuditLogs(auditOffset + auditLimit)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
