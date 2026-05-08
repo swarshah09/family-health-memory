@@ -1,7 +1,36 @@
 import { GoogleGenerativeAI, SchemaType, type Schema } from "@google/generative-ai";
 import { HealthLog, Insight, Severity } from "./types.js";
+import { logAIStageEvent, type AIStage } from "./ai-observability.js";
+import { generateInsights } from "./patterns.js";
+import { decisionEngine } from "./ai-pipeline/decisionEngine.js";
+import { extractorService } from "./ai-pipeline/extractorService.js";
+import { insightService } from "./ai-pipeline/insightService.js";
+import { normalizerService } from "./ai-pipeline/normalizerService.js";
+import { correlationService } from "./ai-pipeline/correlationService.js";
+import { trendService } from "./ai-pipeline/trendService.js";
 
-const DEFAULT_MODEL = "gemini-2.0-flash";
+const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEPRECATED_MODELS = new Set(["gemini-2.0-flash", "models/gemini-2.0-flash"]);
+const MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
+
+function resolveGeminiModelName(): string {
+  const configured = (process.env.GEMINI_MODEL || "").trim();
+  if (!configured) return DEFAULT_MODEL;
+  if (DEPRECATED_MODELS.has(configured)) {
+    console.warn(`Configured GEMINI_MODEL "${configured}" is deprecated; using ${DEFAULT_MODEL} instead.`);
+    return DEFAULT_MODEL;
+  }
+  return configured;
+}
+
+function resolveGeminiModelCandidates(): string[] {
+  return [...new Set([resolveGeminiModelName(), ...MODEL_FALLBACKS])];
+}
+
+function isModelUnavailableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes("not found") || message.includes("not supported for generatecontent");
+}
 
 function toJsonSafe<T>(raw: string, fallback: T): T {
   try {
@@ -12,16 +41,6 @@ function toJsonSafe<T>(raw: string, fallback: T): T {
   }
 }
 
-/** Extract insight rows whether the model returned an array or { insights }. */
-function extractInsightRows(parsed: unknown): Array<Record<string, unknown>> {
-  if (Array.isArray(parsed)) return parsed as Array<Record<string, unknown>>;
-  if (parsed && typeof parsed === "object" && "insights" in parsed) {
-    const inner = (parsed as { insights: unknown }).insights;
-    if (Array.isArray(inner)) return inner as Array<Record<string, unknown>>;
-  }
-  return [];
-}
-
 function slug(s: string) {
   return s
     .toLowerCase()
@@ -29,68 +48,6 @@ function slug(s: string) {
     .replace(/[^a-z0-9-]/g, "")
     .slice(0, 48);
 }
-
-function firstName(full: string): string {
-  const t = full.trim().split(/\s+/)[0];
-  return t || "them";
-}
-
-function compactLogsPayload(logs: HealthLog[]): object[] {
-  return logs.map((l) => ({
-    id: l.id,
-    occurredAt: l.occurredAt,
-    text: l.text.slice(0, 520),
-    tags: (l.tags || []).slice(0, 10),
-    type: l.type
-  }));
-}
-
-const GEMINI_INSIGHTS_RESPONSE_SCHEMA = {
-  type: SchemaType.OBJECT,
-  properties: {
-    insights: {
-      type: SchemaType.ARRAY,
-      description: "Trend hints for caregivers. Empty if logs do not clearly support themes.",
-      minItems: 0,
-      maxItems: 3,
-      items: {
-        type: SchemaType.OBJECT,
-        properties: {
-          title: {
-            type: SchemaType.STRING,
-            description: "Brief headline caregivers can skim (addressed to adults at home)."
-          },
-          description: {
-            type: SchemaType.STRING,
-            description:
-              "Max two sentences: what the notes imply in plain words, plus one calm suggestion (watch/observe/track or chat with clinician)—never a diagnosis."
-          },
-          severity: {
-            type: SchemaType.STRING,
-            format: "enum",
-            enum: ["info", "warning", "alert"],
-            description: "alert only if credible repetition suggests worsening; otherwise lower."
-          },
-          keyword: {
-            type: SchemaType.STRING,
-            description: "Lowercase theme keyword (sleep, dizziness, appetite, etc.)."
-          },
-          confidence: {
-            type: SchemaType.NUMBER,
-            description: "0.35–0.92 from note patterns only—not medical certainty."
-          },
-          evidenceLogIds: {
-            type: SchemaType.ARRAY,
-            description: "Only ids from supplied logs.",
-            items: { type: SchemaType.STRING }
-          }
-        },
-        required: ["title", "description", "severity", "keyword", "confidence", "evidenceLogIds"]
-      }
-    }
-  },
-  required: ["insights"]
-} satisfies Schema;
 
 function clampConfidence(n: number): number {
   if (Number.isNaN(n)) return 0.55;
@@ -111,35 +68,182 @@ function sanitizeGeminiInsight(
   stableIdSuffix: string
 ): Insight | null {
   const validIds = new Set(memberLogs.map((l) => l.id));
-  const rawEvidence = Array.isArray(row.evidenceLogIds)
-    ? (row.evidenceLogIds as unknown[]).map((x) => String(x))
+  const logsById = new Map(memberLogs.map((log) => [log.id, log.text]));
+  const rawEvidence = Array.isArray(row.evidence)
+    ? (row.evidence as unknown[]).map((x) => String(x))
+    : Array.isArray(row.evidenceLogIds)
+      ? (row.evidenceLogIds as unknown[]).map((x) => String(x))
     : [];
-  const evidenceLogIds = rawEvidence.filter((id) => validIds.has(id));
+  const evidence = rawEvidence.filter((id) => validIds.has(id));
   const title = String(row.title || "").trim().slice(0, 220);
-  const description = String(row.description || "").trim().slice(0, 1200);
+  const summary = String(row.summary || row.description || "").trim().slice(0, 600);
+  const details = Array.isArray(row.details)
+    ? (row.details as unknown[]).map((x) => String(x).trim()).filter(Boolean).slice(0, 6)
+    : [];
+  const typeRaw = String(row.type || "").trim().toLowerCase();
+  const priorityRaw = String(row.priority || "").trim().toLowerCase();
   const keywordRaw = String(row.keyword || "").trim().toLowerCase().slice(0, 64);
 
-  if (!title || !description || !keywordRaw) return null;
-  if (evidenceLogIds.length < 2) return null;
+  if (!title || !summary || !keywordRaw) return null;
+  if (evidence.length < 2) return null;
 
   const confidence = clampConfidence(typeof row.confidence === "number" ? row.confidence : 0.55);
-  let severity = normalizeSeverity(row.severity);
-  if (severity === "alert" && evidenceLogIds.length < 4) severity = "warning";
+  const priority = priorityRaw === "high" || priorityRaw === "medium" || priorityRaw === "low" ? priorityRaw : "medium";
+  const type =
+    typeRaw === "trend" || typeRaw === "frequency" || typeRaw === "correlation" || typeRaw === "anomaly" || typeRaw === "red_flag"
+      ? typeRaw
+      : "trend";
+  let severity = normalizeSeverity(row.severity || (priority === "high" ? "alert" : priority === "medium" ? "warning" : "info"));
+  if (severity === "alert" && evidence.length < 4) severity = "warning";
+  const decisionReasons = Array.isArray(row.decisionReasons)
+    ? (row.decisionReasons as unknown[]).map((x) => String(x)).filter(Boolean)
+    : undefined;
 
   return {
     id: `gem-${memberId}-${slug(keywordRaw)}-${stableIdSuffix}`,
     familyId,
     memberId,
+    type,
     title,
-    description,
+    summary,
+    details: details.length
+      ? details
+      : [
+          `Frequency count (42 days): ${evidence.length}`,
+          "Time comparison: see referenced logs for timeline context",
+          "Evidence linked directly to source log IDs"
+        ],
+    priority,
+    evidence,
+    description: summary,
     severity,
     keyword: keywordRaw,
-    count: evidenceLogIds.length,
+    count: evidence.length,
     confidence,
-    evidenceLogIds,
+    sourceLogIds: evidence,
+    evidenceSnippets: evidence.slice(0, 3).map((id) => {
+      const raw = (logsById.get(id) || "").trim();
+      return {
+        logId: id,
+        snippet: raw.length > 140 ? `${raw.slice(0, 137)}...` : raw
+      };
+    }).filter((row) => row.snippet.length > 0),
+    evidenceLogIds: evidence,
     createdAt: new Date().toISOString(),
-    source: "model"
+    source: "model",
+    ...(decisionReasons && decisionReasons.length ? { decisionReasons } : {})
   };
+}
+
+function applyRuleBasedDecisionFallback(
+  fallbackInsights: Insight[],
+  memberLogs: HealthLog[]
+): Insight[] {
+  const redFlagTerms = ["chest pain", "breathlessness", "confusion", "fainting"];
+  const redFlagInsights: Insight[] = [];
+  const template: Insight = {
+    id: "fallback-template",
+    familyId: fallbackInsights[0]?.familyId || "",
+    memberId: fallbackInsights[0]?.memberId || "",
+    type: "red_flag",
+    title: "Health pattern detected",
+    summary: "",
+    details: [],
+    priority: "high",
+    evidence: [],
+    description: "",
+    severity: "alert",
+    keyword: "",
+    count: 1,
+    confidence: 0.95,
+    sourceLogIds: [],
+    evidenceLogIds: [],
+    createdAt: new Date().toISOString(),
+    source: "rules"
+  };
+  for (const term of redFlagTerms) {
+    const matched = memberLogs.filter((l) => l.text.toLowerCase().includes(term)).map((l) => l.id);
+    if (!matched.length) continue;
+    redFlagInsights.push({
+      ...template,
+      id: `rf-${term.replace(/\s+/g, "-")}`,
+      title: `Immediate attention trend: ${term}`,
+      summary: `Recent notes repeatedly mention ${term}, so this is flagged for prompt review.`,
+      details: [
+        `Frequency count: ${matched.length} mentions`,
+        "Time comparison: high-priority trigger based on immediate symptom risk",
+        "Evidence linked directly to source logs"
+      ],
+      priority: "high",
+      evidence: matched,
+      description: `Recent notes repeatedly mention ${term}, so this is flagged for prompt review.`,
+      severity: "alert",
+      keyword: term,
+      count: matched.length,
+      confidence: 0.95,
+      sourceLogIds: matched,
+      evidenceLogIds: matched,
+      createdAt: new Date().toISOString(),
+      source: "rules"
+    });
+  }
+
+  const filteredRules = fallbackInsights
+    .filter((ins) => ins.confidence >= 0.6)
+    .filter((ins) => {
+      const sevenDayAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const recentMatchCount = memberLogs.filter(
+        (l) =>
+          ins.keyword &&
+          l.text.toLowerCase().includes(ins.keyword.toLowerCase()) &&
+          new Date(l.occurredAt).getTime() >= sevenDayAgo
+      ).length;
+      return recentMatchCount >= 3 || ins.severity === "alert";
+    });
+
+  const byKeyword = new Map<string, Insight>();
+  for (const ins of [...redFlagInsights, ...filteredRules]) {
+    const key = ins.keyword.toLowerCase();
+    const existing = byKeyword.get(key);
+    if (!existing || ins.confidence > existing.confidence) byKeyword.set(key, ins);
+  }
+  return [...byKeyword.values()].slice(0, 5);
+}
+
+function correlationFallbackInsights(
+  familyId: string,
+  memberId: string,
+  detections: Array<{
+    symptom: string;
+    correlationType: "time" | "medication" | "activity";
+    description: string;
+    sourceLogIds?: string[];
+  }>
+): Insight[] {
+  return detections.map((d, i) => ({
+    id: `corr-${memberId}-${slug(`${d.symptom}-${d.correlationType}-${i}`)}`,
+    familyId,
+    memberId,
+    type: "correlation",
+    title: `Possible ${d.correlationType} link for ${d.symptom}`,
+    summary: d.description,
+    details: [
+      d.description,
+      `Correlation type: ${d.correlationType}`,
+      `Evidence references: ${(d.sourceLogIds || []).length} log(s)`
+    ],
+    priority: "medium",
+    evidence: d.sourceLogIds || [],
+    description: d.description,
+    severity: "warning",
+    keyword: d.symptom,
+    count: Math.max((d.sourceLogIds || []).length, 2),
+    confidence: 0.66,
+    sourceLogIds: d.sourceLogIds || [],
+    evidenceLogIds: d.sourceLogIds || [],
+    createdAt: new Date().toISOString(),
+    source: "rules"
+  }));
 }
 
 export async function generateGeminiInsights(
@@ -160,64 +264,152 @@ export async function generateGeminiInsights(
 
   if (memberLogs.length < 2) return [];
 
-  const payload = compactLogsPayload(memberLogs.slice(0, 40));
-  const nm = firstName(memberDisplayName);
-  const modelName = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+  const modelName = resolveGeminiModelName();
   const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: modelName });
 
-  const preamble = `You are an assistant helping ADULT CAREGIVERS notice themes across informal home health notes—not a clinician.
-Audience: spouses, adult children, and others coordinating care.
-
-Person in these notes is "${memberDisplayName}" (acceptable to say "${nm}" sparingly).
-
-You must NEVER: diagnose or name a disease, claim emergencies, prescribe, or cite sources outside the logs.
-Prefer zero insights when notes are unrelated noise—that is safer than guesses.
-Each takeaway must cite at least two log ids exactly as given in evidenceLogIds.`;
-
-  const prompt = `${preamble}
-
-Recent notes JSON (each has id, occurredAt, text, tags, type):
-${JSON.stringify(payload, null, 2)}
-
-Return JSON with key "insights"—at most three items—for patterns that genuinely help caregivers prepare conversations or appointments.`;
-
-  let parsed: unknown;
+  const runWithRetry = async <T>(stage: string, task: () => Promise<T>): Promise<T> => {
+    const stageName = stage as AIStage;
+    try {
+      const value = await task();
+      await logAIStageEvent({
+        familyId,
+        personId: memberId,
+        stage: stageName,
+        status: "success",
+        retryCount: 0
+      });
+      return value;
+    } catch (firstError) {
+      console.error(`AI stage failed (${stage}) first attempt`, firstError);
+      try {
+        const value = await task();
+        await logAIStageEvent({
+          familyId,
+          personId: memberId,
+          stage: stageName,
+          status: "success",
+          retryCount: 1
+        });
+        return value;
+      } catch (secondError) {
+        await logAIStageEvent({
+          familyId,
+          personId: memberId,
+          stage: stageName,
+          status: "failure",
+          errorMessage: secondError instanceof Error ? secondError.message : String(secondError),
+          retryCount: 1
+        });
+        throw secondError;
+      }
+    }
+  };
 
   try {
-    const structured = genAI.getGenerativeModel({
-      model: modelName,
-      generationConfig: {
-        temperature: 0.34,
-        maxOutputTokens: 2048,
-        responseMimeType: "application/json",
-        responseSchema: GEMINI_INSIGHTS_RESPONSE_SCHEMA
+    const extracted = await runWithRetry("extractorService", () =>
+      extractorService({
+        model,
+        person: memberDisplayName,
+        logs: memberLogs.map((log) => ({
+          id: log.id,
+          text: log.text,
+          occurredAt: log.occurredAt
+        }))
+      })
+    );
+
+    // Deterministic stage, no model call; keep explicit retry without observability stage metric.
+    const normalized = await (async () => {
+      try {
+        return normalizerService({ events: extracted.events });
+      } catch {
+        return normalizerService({ events: extracted.events });
       }
+    })();
+
+    const trend = await runWithRetry("trendService", async () =>
+      trendService({ events: normalized.events, lookbackDays: 30 })
+    );
+    const correlations = correlationService({
+      events: normalized.events,
+      logs: memberLogs
     });
-    const text = structured.generateContent(prompt).then((r) => r.response.text());
-    parsed = JSON.parse(await text);
-  } catch {
-    try {
-      const fallback = genAI.getGenerativeModel({
-        model: modelName,
-        generationConfig: { temperature: 0.34, maxOutputTokens: 2048 }
-      });
-      const result = await fallback.generateContent(
-        `${prompt}\nRespond with ONLY valid JSON {"insights":[{"title":"","description":"","severity":"info"|"warning"|"alert","keyword":"","confidence":0.5,"evidenceLogIds":[]}]}`
+
+    const generated = await runWithRetry("insightService", () =>
+      insightService({
+        model,
+        person: memberDisplayName,
+        trend,
+        correlations,
+        logs: memberLogs.map((log) => ({ id: log.id, text: log.text }))
+      })
+    );
+
+    const decided = decisionEngine({
+      candidateInsights: generated.insights,
+      normalizedEvents: normalized.events,
+      logs: memberLogs,
+      includeDebugReasons: process.env.NODE_ENV !== "production"
+    });
+
+    const out: Insight[] = [];
+    decided.insights.forEach((row, i) => {
+      const converted = sanitizeGeminiInsight(
+        {
+          type: row.type,
+          title: row.title,
+          summary: row.summary,
+          details: row.details,
+          priority: row.priority,
+          evidence: row.evidence,
+          description: row.description,
+          severity: row.severity,
+          keyword: row.keyword,
+          confidence: row.confidence,
+          evidenceLogIds: row.evidence,
+          decisionReasons: row.decisionReasons
+        },
+        familyId,
+        memberId,
+        memberLogs,
+        String(i)
       );
-      parsed = toJsonSafe<unknown>(result.response.text(), { insights: [] });
-    } catch {
-      return [];
-    }
+      if (converted) out.push(converted);
+    });
+    return out.slice(0, 5);
+  } catch (error) {
+    // Fallback is deterministic and keeps pipeline resilient in production.
+    console.error("AI multi-stage pipeline failed; using rule-based fallback", {
+      familyId,
+      memberId,
+      error
+    });
+    await logAIStageEvent({
+      familyId,
+      personId: memberId,
+      stage: "insight",
+      status: "failure",
+      errorMessage: error instanceof Error ? error.message : String(error),
+      retryCount: 1
+    });
+    const fallback = generateInsights(familyId, memberId, memberDisplayName, memberLogs).slice(0, 12);
+    const extractedFallback = normalizerService({
+      events: memberLogs.map((l) => ({
+        sourceLogId: l.id,
+        person: memberDisplayName,
+        symptoms: l.tags || [],
+        severity: "low",
+        timestamp: l.occurredAt
+      }))
+    });
+    const corrFallback = correlationFallbackInsights(
+      familyId,
+      memberId,
+      correlationService({ events: extractedFallback.events, logs: memberLogs }).correlations
+    );
+    return applyRuleBasedDecisionFallback([...fallback, ...corrFallback], memberLogs);
   }
-
-  const rows = extractInsightRows(parsed);
-  const out: Insight[] = [];
-  rows.forEach((row, i) => {
-    const ins = sanitizeGeminiInsight(row, familyId, memberId, memberLogs, String(i));
-    if (ins) out.push(ins);
-  });
-
-  return out.slice(0, 4);
 }
 
 export async function transcribeAudioWithGemini(
@@ -228,27 +420,38 @@ export async function transcribeAudioWithGemini(
   if (!apiKey) return null;
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const modelName = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-  const model = genAI.getGenerativeModel({
-    model: modelName,
-    generationConfig: { temperature: 0.15, maxOutputTokens: 512 }
-  });
-  const result = await model.generateContent([
-    {
-      text: `Transcribe the spoken caregiver note into clear spoken English prose. Omit um/uh fillers. Keep one short paragraph. If unintelligible, reply SILENT only.
+  for (const modelName of resolveGeminiModelCandidates()) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig: { temperature: 0.15, maxOutputTokens: 512 }
+      });
+      const result = await model.generateContent([
+        {
+          text: `Transcribe the spoken caregiver note into clear spoken English prose. Omit um/uh fillers. Keep one short paragraph. If unintelligible, reply SILENT only.
 
 Preserve everyday wording about symptoms or events—not clinical labels you invent.`
-    },
-    {
-      inlineData: {
-        mimeType,
-        data: audioBase64
+        },
+        {
+          inlineData: {
+            mimeType,
+            data: audioBase64
+          }
+        }
+      ]);
+      const text = result.response.text().trim();
+      if (!text.length || /^silent\.?$/i.test(text)) return null;
+      return text;
+    } catch (error) {
+      if (isModelUnavailableError(error)) {
+        console.warn(`Gemini model "${modelName}" unavailable for transcription; trying fallback.`);
+        continue;
       }
+      console.error("Gemini transcription failed", error);
+      return null;
     }
-  ]);
-  const text = result.response.text().trim();
-  if (!text.length || /^silent\.?$/i.test(text)) return null;
-  return text;
+  }
+  return null;
 }
 
 const EXTRACTION_SCHEMA = {
@@ -290,7 +493,7 @@ export async function extractStructuredHealthSignal(
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const modelName = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+  const modelName = resolveGeminiModelName();
 
   try {
     const model = genAI.getGenerativeModel({

@@ -1,7 +1,7 @@
 import { useApp } from "@/context/AppContext";
 import type { Insight } from "@/context/AppContext";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Sparkles, AlertTriangle, Info, TrendingUp, Shield, Loader2, ListChecks } from "lucide-react";
+import { ArrowLeft, Sparkles, AlertTriangle, Info, TrendingUp, Shield, Loader2, ListChecks, CheckCircle2, Circle } from "lucide-react";
 import { motion } from "framer-motion";
 
 const stagger = {
@@ -24,6 +24,20 @@ function consistencyHint(ins: Insight): string | null {
   return "Possible pattern—consider adding dates or details next time";
 }
 
+function insightTypeLabel(type?: Insight["type"]): string {
+  if (type === "red_flag") return "Red flag";
+  if (type === "frequency") return "Frequency";
+  if (type === "correlation") return "Correlation";
+  if (type === "anomaly") return "Anomaly";
+  return "Trend";
+}
+
+function priorityPillClasses(priority?: Insight["priority"]): string {
+  if (priority === "high") return "bg-destructive/10 text-destructive border-destructive/20";
+  if (priority === "medium") return "bg-warning/10 text-warning border-warning/20";
+  return "bg-muted/80 text-muted-foreground border-border/60";
+}
+
 export default function InsightsPage() {
   const { members, getAllInsights, insightsLoading } = useApp();
   const navigate = useNavigate();
@@ -39,8 +53,14 @@ export default function InsightsPage() {
 
   const totalAlerts = insights.filter((i) => i.severity === "alert").length;
   const totalWarnings = insights.filter((i) => i.severity === "warning").length;
+  const hasInsights = insights.length > 0;
+  const hasEvidenceLinked = insights.some((i) => (i.sourceLogIds || i.evidence || []).length > 0);
+  const hasHighPriority = insights.some((i) => i.priority === "high" || i.severity === "alert");
 
   const showThinking = insightsLoading && insights.length === 0;
+  const openEvidenceLog = (memberId: string, logId: string) => {
+    navigate(`/member/${memberId}?logId=${encodeURIComponent(logId)}`);
+  };
 
   return (
     <div className="app-shell app-safe-bottom">
@@ -66,9 +86,9 @@ export default function InsightsPage() {
             <Sparkles className="h-4 w-4 text-white" aria-hidden />
           </div>
           <div className="min-w-0">
-            <h1 className="font-display font-bold text-white text-lg">Patterns for your family</h1>
+            <h1 className="font-display font-bold text-white text-lg">Family Insights</h1>
             <p className="text-[11px] text-white/70 leading-snug">
-              Plain-language summaries from your logs—combine keyword checks with richer AI summaries
+              Clear observations built from shared logs with linked evidence for quick review
             </p>
           </div>
         </div>
@@ -83,7 +103,7 @@ export default function InsightsPage() {
         >
           {[
             { label: "Alerts", value: totalAlerts, color: "destructive", icon: AlertTriangle },
-            { label: "Watch", value: totalWarnings, color: "warning", icon: Shield },
+            { label: "Warnings", value: totalWarnings, color: "warning", icon: Shield },
             { label: "Themes", value: insights.length, color: "primary", icon: TrendingUp },
           ].map(({ label, value, color, icon: Icon }) => (
             <motion.div
@@ -110,6 +130,79 @@ export default function InsightsPage() {
         initial="hidden"
         animate="show"
       >
+        <motion.details className="glass-card rounded-2xl p-4 group" variants={fadeUp}>
+          <summary className="list-none cursor-pointer flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Quick start (3 steps)</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {[hasInsights, hasEvidenceLinked, hasHighPriority].filter(Boolean).length}/3 done - Show steps
+              </p>
+            </div>
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground group-open:hidden">Expand</span>
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground hidden group-open:inline">Collapse</span>
+          </summary>
+          <div className="mt-3 space-y-3 border-t border-border/30 pt-3">
+            <p className="text-xs text-muted-foreground">
+              This page turns raw logs into readable patterns so you can quickly decide what needs follow-up.
+            </p>
+            <div className="space-y-2">
+              {[
+                {
+                  done: hasInsights,
+                  title: "Check each member's pattern list",
+                  desc: "Start by scanning the most recent insights for each person."
+                },
+                {
+                  done: hasEvidenceLinked,
+                  title: "Open evidence logs",
+                  desc: "Tap log IDs to verify each insight against original notes."
+                },
+                {
+                  done: hasHighPriority,
+                  title: "Prioritize high alerts first",
+                  desc: "Handle high-priority or alert-level items before low-priority observations."
+                }
+              ].map((step) => (
+                <div key={step.title} className="rounded-xl border border-border/40 bg-muted/30 p-3">
+                  <div className="flex items-start gap-2">
+                    {step.done ? (
+                      <CheckCircle2 className="h-4 w-4 text-success mt-0.5 shrink-0" />
+                    ) : (
+                      <Circle className="h-4 w-4 text-muted-foreground/70 mt-0.5 shrink-0" />
+                    )}
+                    <div>
+                      <p className={`text-xs font-medium ${step.done ? "text-success" : "text-foreground"}`}>{step.title}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{step.desc}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </motion.details>
+
+        <motion.details className="glass-card rounded-2xl p-4 border border-border/40 group" variants={fadeUp}>
+          <summary className="list-none cursor-pointer flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Need help reading this page?</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Show guide</p>
+            </div>
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground group-open:hidden">Expand</span>
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground hidden group-open:inline">Collapse</span>
+          </summary>
+          <div className="mt-3 space-y-2.5 border-t border-border/30 pt-3">
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Use these terms to decide what to follow up first.
+            </p>
+            <div className="space-y-1.5 text-[11px] text-foreground/85">
+              <p><span className="font-semibold text-foreground">Info:</span> light observation, monitor over time.</p>
+              <p><span className="font-semibold text-foreground">Warning:</span> repeated pattern, check in soon.</p>
+              <p><span className="font-semibold text-foreground">Alert:</span> stronger concern, review today and consider clinical follow-up.</p>
+              <p><span className="font-semibold text-foreground">Evidence logs:</span> source notes that support an insight.</p>
+            </div>
+          </div>
+        </motion.details>
+
         {showThinking && (
           <motion.div
             className="glass-card rounded-2xl p-8 flex flex-col items-center gap-3 text-center"
@@ -141,15 +234,21 @@ export default function InsightsPage() {
                   ins.source === "rules" ? (
                     <span className="inline-flex items-center gap-1 rounded-lg bg-muted/80 px-2 py-0.5 text-[10px] font-medium text-muted-foreground border border-border/50">
                       <ListChecks className="h-3 w-3" aria-hidden />
-                      Recurring mentions
+                      Rule-based
                     </span>
                   ) : ins.source === "model" ? (
                     <span className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary border border-primary/15">
                       <Sparkles className="h-3 w-3" aria-hidden />
-                      Narrative summary
+                      AI-assisted
                     </span>
                   ) : null;
                 const hint = consistencyHint(ins);
+                const summaryText = ins.summary || ins.description;
+                const detailLines = (ins.details || []).filter(Boolean).slice(0, 3);
+                const evidenceIds = (ins.sourceLogIds || ins.evidence || []).filter(Boolean);
+                const snippetsByLogId = new Map(
+                  (ins.evidenceSnippets || []).map((item) => [item.logId, item.snippet])
+                );
 
                 return (
                   <motion.div
@@ -190,8 +289,59 @@ export default function InsightsPage() {
                         <div className="flex flex-wrap items-center gap-2 gap-y-1">
                           <p className="text-sm font-semibold text-foreground leading-snug">{ins.title}</p>
                           {badge}
+                          <span className="inline-flex items-center rounded-lg border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            {insightTypeLabel(ins.type)}
+                          </span>
+                          <span
+                            className={`inline-flex items-center rounded-lg border px-2 py-0.5 text-[10px] font-medium ${priorityPillClasses(
+                              ins.priority
+                            )}`}
+                          >
+                            {`Priority: ${ins.priority || "medium"}`}
+                          </span>
                         </div>
-                        <p className="text-xs text-muted-foreground leading-relaxed">{ins.description}</p>
+                        <p className="text-xs text-muted-foreground leading-relaxed">{summaryText}</p>
+                        {detailLines.length > 0 && (
+                          <ul className="space-y-1 pt-0.5">
+                            {detailLines.map((line) => (
+                              <li key={`${ins.id}-${line}`} className="text-[11px] text-foreground/80 leading-relaxed">
+                                • {line}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {evidenceIds.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-[10px] text-muted-foreground/90">Evidence logs</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {evidenceIds.slice(0, 3).map((logId) => (
+                                <button
+                                  key={`${ins.id}-${logId}`}
+                                  type="button"
+                                  title={snippetsByLogId.get(logId) || "Open source log"}
+                                  onClick={() => openEvidenceLog(ins.memberId, logId)}
+                                  className="inline-flex items-center rounded-md border border-border/70 bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
+                                >
+                                  {logId}
+                                </button>
+                              ))}
+                              {evidenceIds.length > 3 ? (
+                                <span className="inline-flex items-center rounded-md border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground/90">
+                                  +{evidenceIds.length - 3} more
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        )}
+                        {ins.evidenceSnippets && ins.evidenceSnippets.length > 0 ? (
+                          <div className="space-y-0.5 pt-0.5">
+                            {ins.evidenceSnippets.slice(0, 2).map((item) => (
+                              <p key={`${ins.id}-snippet-${item.logId}`} className="text-[10px] text-muted-foreground/80">
+                                <span className="font-medium text-foreground/70">{item.logId}:</span> {item.snippet}
+                              </p>
+                            ))}
+                          </div>
+                        ) : null}
                         {hint ? <p className="text-[10px] text-muted-foreground/80 italic">{hint}</p> : null}
                       </div>
                       <div className="flex flex-col items-end gap-1 shrink-0 text-right">

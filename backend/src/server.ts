@@ -14,24 +14,33 @@ import {
   requireRole,
   signAccessToken
 } from "./auth.js";
+import { getAIObservabilitySummary } from "./ai-observability.js";
 import { listAuditLogs, writeAuditLog } from "./audit.js";
+import { ingestChatStyleLog } from "./chat-input.js";
 import { transcribeAudioWithGemini } from "./gemini.js";
+import { generateWeeklyDigestForUserPerson } from "./insight-precompute.js";
 import { startInsightJobs } from "./jobs.js";
 import { RefreshTokenModel, UserModel } from "./models.js";
+import { processVoiceLogTranscriptionAsync } from "./voice-processing.js";
 import {
-  cacheInsightsSnapshot,
   createLog,
   createMember,
+  deleteLog,
   deleteMember,
   updateMember,
+  getLogById,
   getLatestInsightsSnapshot,
   getAutomationSettings,
   getAutomationStatus,
-  listInsights,
+  getDoctorVisitSummary,
+  listDigestsForUserPerson,
+  listPrecomputedInsightsForUser,
   listLogs,
   updateLog,
   listMembers,
   listNotifications,
+  listContextualReengagementPrompts,
+  listTimelineNarrativeEvents,
   listFamilyUsers,
   ingestChatMessage,
   listPendingChatIngestReviews,
@@ -217,7 +226,111 @@ app.post("/api/auth/logout", async (req, res) => {
   return res.status(204).send();
 });
 
+app.get("/api/digests/:userId/:personId", authMiddleware, async (req, res) => {
+  const auth = req as { auth?: { userId: string; familyId: string; role: "owner" | "caregiver" | "viewer" } };
+  const canReadOtherUsers = auth.auth?.role === "owner" || auth.auth?.role === "caregiver";
+  if (!canReadOtherUsers && auth.auth?.userId !== req.params.userId) {
+    return res.status(403).json({ message: "Cannot access digests for another user" });
+  }
+  const targetUser = await UserModel.findById(req.params.userId);
+  if (!targetUser || String(targetUser.familyId) !== auth.auth?.familyId) {
+    return res.status(404).json({ message: "Digest owner not found" });
+  }
+  const digests = await listDigestsForUserPerson(auth.auth?.familyId || "", req.params.userId, req.params.personId);
+  return res.json({ digests });
+});
+
+app.post("/api/digests/:userId/:personId/generate", authMiddleware, async (req, res) => {
+  const auth = req as { auth?: { userId: string; familyId: string; role: "owner" | "caregiver" | "viewer"; email: string } };
+  const canGenerateForOtherUsers = auth.auth?.role === "owner" || auth.auth?.role === "caregiver";
+  if (!canGenerateForOtherUsers && auth.auth?.userId !== req.params.userId) {
+    return res.status(403).json({ message: "Cannot generate digests for another user" });
+  }
+  const targetUser = await UserModel.findById(req.params.userId);
+  if (!targetUser || String(targetUser.familyId) !== auth.auth?.familyId) {
+    return res.status(404).json({ message: "Digest owner not found" });
+  }
+  const digest = await generateWeeklyDigestForUserPerson({
+    userId: req.params.userId,
+    personId: req.params.personId
+  });
+  if (!digest) return res.status(404).json({ message: "Member not found for digest generation" });
+  await writeAuditLog({
+    familyId: auth.auth?.familyId || "unknown",
+    actorUserId: auth.auth?.userId || "unknown",
+    actorEmail: auth.auth?.email || "unknown",
+    action: "digest.generate.manual",
+    targetType: "weekly_digest",
+    targetId: `${req.params.userId}:${req.params.personId}`,
+    metadata: { generatedAt: digest.generatedAt.toISOString() }
+  });
+  return res.status(201).json({
+    digest: {
+      title: digest.title,
+      summary: digest.summary,
+      highlights: digest.highlights,
+      generatedAt: digest.generatedAt.toISOString()
+    }
+  });
+});
+
+const chatLogApiSchema = z.object({
+  userId: z.string().min(1),
+  message: z.string().min(1)
+});
+
+app.post("/api/logs/chat", authMiddleware, async (req, res) => {
+  const parsed = chatLogApiSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid chat log payload" });
+
+  const auth = req as { auth?: { userId: string; role: "owner" | "caregiver" | "viewer"; familyId: string; email: string } };
+  const canWriteForOtherUser = auth.auth?.role === "owner";
+  if (!canWriteForOtherUser && auth.auth?.userId !== parsed.data.userId) {
+    return res.status(403).json({ message: "Cannot submit chat logs for another user" });
+  }
+
+  try {
+    await ingestChatStyleLog({
+      userId: parsed.data.userId,
+      message: parsed.data.message
+    });
+    await writeAuditLog({
+      familyId: auth.auth?.familyId || "unknown",
+      actorUserId: auth.auth?.userId || "unknown",
+      actorEmail: auth.auth?.email || "unknown",
+      action: "chat.log.api.ingest",
+      targetType: "chat_input",
+      targetId: parsed.data.userId,
+      metadata: { messageLength: parsed.data.message.length }
+    });
+    return res.json({ success: true });
+  } catch (error) {
+    if (error instanceof Error && error.message === "USER_NOT_FOUND") {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (error instanceof Error && error.message === "EMPTY_MESSAGE") {
+      return res.status(400).json({ message: "Message is empty" });
+    }
+    console.error("Failed to ingest /api/logs/chat", error);
+    return res.status(500).json({ message: "Failed to ingest chat log" });
+  }
+});
+
 app.use("/api/families/:familyId", authMiddleware);
+
+const aiObservabilityQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(90).optional()
+});
+
+app.get("/api/families/:familyId/ai-observability", requireRole(["owner"]), async (req, res) => {
+  if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
+    return res.status(403).json({ message: "Forbidden family access" });
+  }
+  const parsed = aiObservabilityQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid observability query payload" });
+  const summary = await getAIObservabilitySummary(req.params.familyId, parsed.data.days || 7);
+  res.json(summary);
+});
 
 app.get("/api/families/:familyId/users", requireRole(["owner", "caregiver"]), async (req, res) => {
   if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
@@ -398,6 +511,24 @@ app.get("/api/families/:familyId/logs", async (req, res) => {
   res.json({ logs: await listLogs(req.params.familyId, memberId) });
 });
 
+app.get("/api/families/:familyId/timeline/:memberId", async (req, res) => {
+  if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
+    return res.status(403).json({ message: "Forbidden family access" });
+  }
+  const events = await listTimelineNarrativeEvents(req.params.familyId, req.params.memberId);
+  res.json({ events });
+});
+
+app.get("/api/families/:familyId/doctor-summary/:memberId", async (req, res) => {
+  if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
+    return res.status(403).json({ message: "Forbidden family access" });
+  }
+  const days = Number(req.query.days || 30);
+  const summary = await getDoctorVisitSummary(req.params.familyId, req.params.memberId, Math.min(Math.max(days, 7), 90));
+  if (!summary) return res.status(404).json({ message: "Member not found" });
+  res.json({ summary });
+});
+
 const addLogSchema = z.object({
   memberId: z.string().min(1),
   createdBy: z.string().default("family-user"),
@@ -411,10 +542,13 @@ app.post("/api/families/:familyId/logs", async (req, res) => {
   if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
     return res.status(403).json({ message: "Forbidden family access" });
   }
+  const auth = req as { auth?: { userId: string; role: "owner" | "caregiver" | "viewer"; email: string } };
   const parsed = addLogSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid log payload" });
   const log = await createLog(req.params.familyId, {
     ...parsed.data,
+    contributorId: auth.auth?.userId || parsed.data.createdBy,
+    contributorRole: auth.auth?.role || "viewer",
     occurredAt: parsed.data.occurredAt || new Date().toISOString()
   });
   await writeAuditLog({
@@ -438,6 +572,14 @@ app.patch("/api/families/:familyId/logs/:logId", requireRole(["owner", "caregive
   if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
     return res.status(403).json({ message: "Forbidden family access" });
   }
+  const auth = req as { auth?: { userId: string; role: "owner" | "caregiver" | "viewer"; email: string } };
+  const existing = await getLogById(req.params.familyId, req.params.logId);
+  if (!existing) return res.status(404).json({ message: "Log not found" });
+  const canEdit =
+    auth.auth?.role === "owner" ||
+    auth.auth?.role === "caregiver" ||
+    (auth.auth?.role === "viewer" && existing.contributorId === auth.auth?.userId);
+  if (!canEdit) return res.status(403).json({ message: "Insufficient permissions for this log" });
   const parsed = updateLogSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid log update payload" });
   const updated = await updateLog(req.params.familyId, req.params.logId, parsed.data);
@@ -454,10 +596,37 @@ app.patch("/api/families/:familyId/logs/:logId", requireRole(["owner", "caregive
   return res.json({ log: updated });
 });
 
+app.delete("/api/families/:familyId/logs/:logId", requireRole(["owner", "caregiver", "viewer"]), async (req, res) => {
+  if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
+    return res.status(403).json({ message: "Forbidden family access" });
+  }
+  const auth = req as { auth?: { userId: string; role: "owner" | "caregiver" | "viewer"; email: string } };
+  const existing = await getLogById(req.params.familyId, req.params.logId);
+  if (!existing) return res.status(404).json({ message: "Log not found" });
+  const canDelete =
+    auth.auth?.role === "owner" ||
+    auth.auth?.role === "caregiver" ||
+    (auth.auth?.role === "viewer" && existing.contributorId === auth.auth?.userId);
+  if (!canDelete) return res.status(403).json({ message: "Insufficient permissions for this log" });
+  const removed = await deleteLog(req.params.familyId, req.params.logId);
+  if (!removed) return res.status(404).json({ message: "Log not found" });
+  await writeAuditLog({
+    familyId: req.params.familyId,
+    actorUserId: (req as { auth?: { userId: string } }).auth?.userId || "unknown",
+    actorEmail: (req as { auth?: { email: string } }).auth?.email || "unknown",
+    action: "log.delete",
+    targetType: "log",
+    targetId: req.params.logId,
+    metadata: { memberId: removed.memberId, type: removed.type }
+  });
+  return res.status(204).send();
+});
+
 app.post("/api/families/:familyId/logs/voice", upload.single("audio"), async (req, res) => {
   if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
     return res.status(403).json({ message: "Forbidden family access" });
   }
+  const auth = req as { auth?: { userId: string; role: "owner" | "caregiver" | "viewer"; email: string } };
   const bodySchema = z.object({
     memberId: z.string().min(1),
     createdBy: z.string().default("family-user"),
@@ -467,20 +636,36 @@ app.post("/api/families/:familyId/logs/voice", upload.single("audio"), async (re
   if (!parsed.success) return res.status(400).json({ message: "Invalid voice log payload" });
 
   const file = req.file;
-  const generatedTranscript =
-    !parsed.data.transcript && file
-      ? await transcribeAudioWithGemini(file.buffer.toString("base64"), file.mimetype || "audio/webm")
-      : null;
-  const transcript =
-    parsed.data.transcript || generatedTranscript || "Voice note logged (transcript pending).";
+  if (!file && !parsed.data.transcript) {
+    return res.status(400).json({ message: "Audio file or transcript is required" });
+  }
+  const transcript = parsed.data.transcript || "Voice note received. Transcription in progress.";
+  const audioBase64 = file?.buffer?.toString("base64");
+  const audioUrl = file ? `upload://voice/${Date.now()}-${Math.random().toString(36).slice(2, 9)}` : undefined;
   const log = await createLog(req.params.familyId, {
     memberId: parsed.data.memberId,
     createdBy: parsed.data.createdBy,
+    contributorId: auth.auth?.userId || parsed.data.createdBy,
+    contributorRole: auth.auth?.role || "viewer",
     text: transcript,
     type: "voice",
     occurredAt: new Date().toISOString(),
-    audioBase64: req.file?.buffer?.toString("base64")
+    audioBase64,
+    audioUrl,
+    transcript: parsed.data.transcript || undefined,
+    transcriptionStatus: parsed.data.transcript ? "completed" : file ? "processing" : "pending"
   });
+
+  if (!parsed.data.transcript && file && audioBase64) {
+    processVoiceLogTranscriptionAsync({
+      logId: log.id,
+      familyId: req.params.familyId,
+      memberId: parsed.data.memberId,
+      mimeType: file.mimetype || "audio/webm",
+      audioBase64
+    });
+  }
+
   await writeAuditLog({
     familyId: req.params.familyId,
     actorUserId: (req as { auth?: { userId: string } }).auth?.userId || "unknown",
@@ -490,23 +675,43 @@ app.post("/api/families/:familyId/logs/voice", upload.single("audio"), async (re
     targetId: log.id,
     metadata: { memberId: log.memberId }
   });
-  res.status(201).json({ log });
+  res.status(202).json({ log });
+});
+
+const insightsQuerySchema = z.object({
+  debug: z.coerce.number().int().min(0).max(1).optional()
 });
 
 app.get("/api/families/:familyId/insights", async (req, res) => {
   if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
     return res.status(403).json({ message: "Forbidden family access" });
   }
-  const liveInsights = await listInsights(req.params.familyId);
-  await cacheInsightsSnapshot(req.params.familyId);
+  const parsedQuery = insightsQuerySchema.safeParse(req.query);
+  if (!parsedQuery.success) return res.status(400).json({ message: "Invalid insights query payload" });
+  const auth = req as { auth?: { userId: string; email: string; role?: "owner" | "caregiver" | "viewer" } };
+  const includeDebug = parsedQuery.data.debug === 1;
+  if (includeDebug && auth.auth?.role !== "owner") {
+    return res.status(403).json({ message: "Debug insights are owner-only" });
+  }
+  const precomputedInsights = await listPrecomputedInsightsForUser(
+    req.params.familyId,
+    auth.auth?.userId || ""
+  );
+  const insightsForResponse = includeDebug
+    ? precomputedInsights
+    : precomputedInsights.map((ins) => {
+        const { decisionReasons: _debugDecisionReasons, ...safe } = ins;
+        return safe;
+      });
   await writeAuditLog({
     familyId: req.params.familyId,
-    actorUserId: (req as { auth?: { userId: string } }).auth?.userId || "unknown",
-    actorEmail: (req as { auth?: { email: string } }).auth?.email || "unknown",
-    action: "insight.generate.live",
-    targetType: "insight_batch"
+    actorUserId: auth.auth?.userId || "unknown",
+    actorEmail: auth.auth?.email || "unknown",
+    action: "insight.fetch.precomputed",
+    targetType: "insight_batch",
+    metadata: { debug: includeDebug }
   });
-  res.json({ insights: liveInsights });
+  res.json({ insights: insightsForResponse });
 });
 
 app.get("/api/families/:familyId/insights/latest", async (req, res) => {
@@ -574,6 +779,14 @@ app.get("/api/families/:familyId/notifications", async (req, res) => {
   }
   const notifications = await listNotifications(req.params.familyId);
   res.json({ notifications });
+});
+
+app.get("/api/families/:familyId/reengagement-prompts", async (req, res) => {
+  if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
+    return res.status(403).json({ message: "Forbidden family access" });
+  }
+  const prompts = await listContextualReengagementPrompts(req.params.familyId);
+  res.json({ prompts });
 });
 
 app.patch("/api/families/:familyId/notifications/:notificationId/read", async (req, res) => {

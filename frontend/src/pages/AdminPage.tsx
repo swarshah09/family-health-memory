@@ -18,6 +18,16 @@ import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -27,6 +37,36 @@ type NotificationItem = {
   message: string;
   severity: "info" | "warning" | "alert";
   isRead: boolean;
+  createdAt: string;
+};
+
+type AIObservabilitySummary = {
+  lookbackDays: number;
+  totalEvents: number;
+  failures: number;
+  retryEvents: number;
+  insightSuccessRate: number;
+  extractionFailures: number;
+  trend: Array<{
+    date: string;
+    successes: number;
+    failures: number;
+    retries: number;
+  }>;
+  recentFailures: Array<{
+    stage: "extractor" | "trend" | "insight";
+    errorMessage: string | null;
+    timestamp: string;
+  }>;
+};
+
+type ReengagementPrompt = {
+  id: string;
+  memberId: string;
+  triggerType: "inactive_logging" | "recurring_unresolved" | "no_followup_after_trend";
+  prompt: string;
+  reason: string;
+  severity: "info" | "warning";
   createdAt: string;
 };
 
@@ -64,6 +104,9 @@ export default function AdminPage() {
     notificationsEnabled: boolean;
   } | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [observability, setObservability] = useState<AIObservabilitySummary | null>(null);
+  const [observabilityDays, setObservabilityDays] = useState("7");
+  const [observabilityLoading, setObservabilityLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "team" | "members" | "alerts" | "audit">("overview");
   const [teamQuery, setTeamQuery] = useState("");
   const [memberQuery, setMemberQuery] = useState("");
@@ -86,6 +129,16 @@ export default function AdminPage() {
       createdAt: string;
     }>
   >([]);
+  const [pendingRoleChange, setPendingRoleChange] = useState<{
+    userId: string;
+    name: string;
+    nextRole: "owner" | "caregiver" | "viewer";
+  } | null>(null);
+  const [pendingRolePassword, setPendingRolePassword] = useState("");
+  const [updatingRole, setUpdatingRole] = useState(false);
+  const [pendingMemberDelete, setPendingMemberDelete] = useState<{ id: string; name: string } | null>(null);
+  const [deletingMember, setDeletingMember] = useState(false);
+  const [reengagementPrompts, setReengagementPrompts] = useState<ReengagementPrompt[]>([]);
 
   const latestLogs = useMemo(
     () => [...logs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 8),
@@ -113,6 +166,16 @@ export default function AdminPage() {
       const notifJson = await notifRes.json();
       setNotifications(notifJson.notifications || []);
     }
+  };
+
+  const fetchReengagementPrompts = async () => {
+    if (!user || !token) return;
+    const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/reengagement-prompts`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!response.ok) return;
+    const json = (await response.json()) as { prompts?: ReengagementPrompt[] };
+    setReengagementPrompts(json.prompts || []);
   };
 
   const toIsoOrNull = (v: string): string | null => {
@@ -147,6 +210,31 @@ export default function AdminPage() {
     setAuditOffset(Number(json.offset || 0));
   };
 
+  const fetchObservability = async () => {
+    if (!user || !token) return;
+    const days = Number(observabilityDays) || 7;
+    setObservabilityLoading(true);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/families/${user.familyId}/ai-observability?days=${Math.min(
+          Math.max(days, 1),
+          90
+        )}`,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      if (!response.ok) {
+        toast.error("Failed to load AI observability");
+        return;
+      }
+      const json = (await response.json()) as AIObservabilitySummary;
+      setObservability(json);
+    } finally {
+      setObservabilityLoading(false);
+    }
+  };
+
   const exportCsv = (filename: string, rows: Array<Record<string, unknown>>) => {
     if (!rows.length) {
       toast.error("Nothing to export");
@@ -168,12 +256,28 @@ export default function AdminPage() {
     if (!user) return;
     loadFamilyUsers().catch(() => {});
     fetchAutomation().catch(() => {});
+    fetchObservability().catch(() => {});
+    fetchReengagementPrompts().catch(() => {});
   }, [user?.familyId]);
 
   useEffect(() => {
     if (activeTab !== "audit") return;
     fetchAuditLogs(auditOffset).catch(() => {});
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "overview") return;
+    fetchObservability().catch(() => {});
+  }, [activeTab, observabilityDays]);
+
+  useEffect(() => {
+    if (activeTab !== "overview") return;
+    const timer = window.setInterval(() => {
+      fetchObservability().catch(() => {});
+      fetchReengagementPrompts().catch(() => {});
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [activeTab, observabilityDays, user?.familyId]);
 
   if (user?.role !== "owner") {
     return (
@@ -257,6 +361,43 @@ export default function AdminPage() {
     if (!q) return notifications;
     return notifications.filter((n) => n.message.toLowerCase().includes(q) || n.severity.includes(q));
   }, [notifications, alertQuery]);
+
+  const confirmRoleChange = () => {
+    if (!pendingRoleChange || updatingRole) return;
+    if (!pendingRolePassword.trim()) {
+      toast.error("Current password is required");
+      return;
+    }
+    setUpdatingRole(true);
+    updateFamilyUserRole(pendingRoleChange.userId, pendingRoleChange.nextRole, pendingRolePassword.trim())
+      .then(() => {
+        toast.success(`Role updated for ${pendingRoleChange.name}`);
+        setPendingRoleChange(null);
+        setPendingRolePassword("");
+      })
+      .catch((err: Error) => toast.error(err.message || "Role update failed"))
+      .finally(() => setUpdatingRole(false));
+  };
+
+  const confirmMemberDelete = () => {
+    if (!pendingMemberDelete || deletingMember) return;
+    setDeletingMember(true);
+    removeMember(pendingMemberDelete.id)
+      .then(() => {
+        toast.success(`${pendingMemberDelete.name} removed`);
+        setPendingMemberDelete(null);
+      })
+      .catch((err: Error) => toast.error(err.message || "Could not remove member"))
+      .finally(() => setDeletingMember(false));
+  };
+
+  const maxDailyEvents = useMemo(() => {
+    if (!observability?.trend?.length) return 1;
+    return Math.max(
+      1,
+      ...observability.trend.map((point) => point.successes + point.failures)
+    );
+  }, [observability]);
 
   return (
     <div className="app-shell app-safe-bottom bg-[#151412] text-white">
@@ -387,6 +528,119 @@ export default function AdminPage() {
             </div>
           )}
         </div>
+            <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <FileSearch className="h-4 w-4 text-warning" />
+                  <p className="text-sm font-semibold">AI observability</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    className="h-8"
+                    onClick={() =>
+                      exportCsv(
+                        `ai-observability-${new Date().toISOString().slice(0, 10)}.csv`,
+                        (observability?.trend || []).map((point) => ({
+                          date: point.date,
+                          successes: point.successes,
+                          failures: point.failures,
+                          retries: point.retries
+                        }))
+                      )
+                    }
+                  >
+                    <Download className="h-4 w-4 mr-2" /> Export
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-8"
+                    onClick={() => fetchObservability()}
+                    disabled={observabilityLoading}
+                  >
+                    Refresh
+                  </Button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-white/60">Lookback</p>
+                <Input
+                  type="number"
+                  min={1}
+                  max={90}
+                  value={observabilityDays}
+                  onChange={(e) => setObservabilityDays(e.target.value)}
+                  className="h-8 w-20"
+                />
+                <p className="text-xs text-white/60">days</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl border border-white/10 p-3">
+                  <p className="text-[11px] text-white/55">Insight success rate</p>
+                  <p className="text-lg font-semibold">
+                    {observability ? `${(observability.insightSuccessRate * 100).toFixed(1)}%` : "--"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-white/10 p-3">
+                  <p className="text-[11px] text-white/55">Total stage events</p>
+                  <p className="text-lg font-semibold">{observability?.totalEvents ?? "--"}</p>
+                </div>
+                <div className="rounded-xl border border-white/10 p-3">
+                  <p className="text-[11px] text-white/55">AI processing failures</p>
+                  <p className="text-lg font-semibold text-destructive">{observability?.failures ?? "--"}</p>
+                </div>
+                <div className="rounded-xl border border-white/10 p-3">
+                  <p className="text-[11px] text-white/55">Extraction failures</p>
+                  <p className="text-lg font-semibold text-destructive">{observability?.extractionFailures ?? "--"}</p>
+                </div>
+                <div className="rounded-xl border border-white/10 p-3 col-span-2">
+                  <p className="text-[11px] text-white/55">Retry events</p>
+                  <p className="text-lg font-semibold">{observability?.retryEvents ?? "--"}</p>
+                </div>
+              </div>
+              <p className="text-xs text-white/50">
+                {observabilityLoading
+                  ? "Loading observability metrics..."
+                  : "Metrics reflect extractor/trend/insight stage logs from background AI processing. Auto-refresh: 30s."}
+              </p>
+              {observability?.trend?.length ? (
+                <div className="space-y-2 pt-1">
+                  <p className="text-xs text-white/60">Daily stage trend</p>
+                  {observability.trend.map((point) => {
+                    const total = point.successes + point.failures;
+                    const successWidth = total ? (point.successes / maxDailyEvents) * 100 : 0;
+                    const failureWidth = total ? (point.failures / maxDailyEvents) * 100 : 0;
+                    return (
+                      <div key={point.date} className="grid grid-cols-[78px_1fr] gap-2 items-center">
+                        <p className="text-[11px] text-white/50">{point.date.slice(5)}</p>
+                        <div className="rounded-md bg-black/25 h-3 overflow-hidden flex">
+                          <div className="bg-success/80 h-3" style={{ width: `${successWidth}%` }} />
+                          <div className="bg-destructive/80 h-3" style={{ width: `${failureWidth}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <div className="pt-1">
+                <p className="text-xs text-white/60 mb-1">Recent failures</p>
+                <div className="space-y-1.5">
+                  {(observability?.recentFailures || []).map((item, idx) => (
+                    <div key={`${item.timestamp}-${idx}`} className="rounded-lg border border-white/10 p-2">
+                      <p className="text-[11px] text-white/50">
+                        {new Date(item.timestamp).toLocaleString()} · {item.stage}
+                      </p>
+                      <p className="text-xs text-white/80 mt-1 line-clamp-2">
+                        {item.errorMessage || "No error message captured"}
+                      </p>
+                    </div>
+                  ))}
+                  {!observability?.recentFailures?.length && (
+                    <p className="text-xs text-white/50">No recent failures in this lookback window.</p>
+                  )}
+                </div>
+              </div>
+            </div>
             <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4">
               <p className="text-sm font-semibold mb-2">Recent log activity</p>
               <div className="space-y-2">
@@ -399,6 +653,39 @@ export default function AdminPage() {
                   </div>
                 ))}
                 {latestLogs.length === 0 && <p className="text-xs text-white/50">No logs yet.</p>}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-sm font-semibold">Contextual re-engagement</p>
+                <Button variant="outline" className="h-8" onClick={() => fetchReengagementPrompts()}>
+                  Refresh
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {reengagementPrompts.slice(0, 6).map((prompt) => {
+                  const memberName = memberNameById.get(prompt.memberId) || "Member";
+                  return (
+                    <div key={prompt.id} className="rounded-lg border border-white/10 p-3">
+                      <p className="text-xs text-white/50">
+                        {memberName} · {prompt.reason}
+                      </p>
+                      <p className="text-sm mt-1">{prompt.prompt}</p>
+                      <div className="mt-2">
+                        <Button
+                          variant="outline"
+                          className="h-8"
+                          onClick={() => navigate(`/member/${prompt.memberId}`)}
+                        >
+                          Open member timeline
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {reengagementPrompts.length === 0 ? (
+                  <p className="text-xs text-white/50">No contextual follow-up prompts right now.</p>
+                ) : null}
               </div>
             </div>
           </>
@@ -481,19 +768,11 @@ export default function AdminPage() {
                       const nextRole = value as "owner" | "caregiver" | "viewer";
                       const ownerSensitive = u.role === "owner" || nextRole === "owner";
                       if (ownerSensitive) {
-                        const confirmed = window.confirm(
-                          `Confirm owner-level role change for ${u.name}. You must verify with your password.`
-                        );
-                        if (!confirmed) return;
-                        const currentPassword = window.prompt("Enter your current account password:");
-                        if (!currentPassword) return;
-                        updateFamilyUserRole(u.id, nextRole, currentPassword)
-                          .then(() => toast.success(`Updated role for ${u.name}`))
-                          .catch((err: Error) => toast.error(err.message || "Role update failed"));
+                        setPendingRoleChange({ userId: u.id, name: u.name, nextRole });
                         return;
                       }
                       updateFamilyUserRole(u.id, nextRole)
-                        .then(() => toast.success(`Updated role for ${u.name}`))
+                        .then(() => toast.success(`Role updated for ${u.name}`))
                         .catch((err: Error) => toast.error(err.message || "Role update failed"));
                     })()
                   }
@@ -605,15 +884,7 @@ export default function AdminPage() {
                 <Button
                   variant="destructive"
                   className="h-8"
-                  onClick={() => {
-                    const confirmed = window.confirm(
-                      `Delete ${m.name}? This also deletes all of their logs and cannot be undone.`
-                    );
-                    if (!confirmed) return;
-                    removeMember(m.id)
-                      .then(() => toast.success(`Removed ${m.name}`))
-                      .catch((err: Error) => toast.error(err.message || "Could not remove member"));
-                  }}
+                  onClick={() => setPendingMemberDelete({ id: m.id, name: m.name })}
                 >
                   Remove
                 </Button>
@@ -776,6 +1047,73 @@ export default function AdminPage() {
           </div>
         )}
       </div>
+      <AlertDialog
+        open={!!pendingRoleChange}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setPendingRoleChange(null);
+            setPendingRolePassword("");
+          }
+        }}
+      >
+        <AlertDialogContent className="max-w-sm rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm role change</AlertDialogTitle>
+            <AlertDialogDescription>
+              You are updating owner-level permissions for {pendingRoleChange?.name || "this user"}.
+              Enter your current account password to continue.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            type="password"
+            placeholder="Current account password"
+            value={pendingRolePassword}
+            onChange={(e) => setPendingRolePassword(e.target.value)}
+            className="h-10 rounded-xl"
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={updatingRole}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                confirmRoleChange();
+              }}
+              disabled={updatingRole}
+            >
+              {updatingRole ? "Updating..." : "Confirm"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={!!pendingMemberDelete}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingMemberDelete(null);
+        }}
+      >
+        <AlertDialogContent className="max-w-sm rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete member?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove {pendingMemberDelete?.name || "this member"} and all related logs.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingMember}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                confirmMemberDelete();
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deletingMember}
+            >
+              {deletingMember ? "Deleting..." : "Delete member"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

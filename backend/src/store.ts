@@ -1,7 +1,6 @@
 import bcrypt from "bcryptjs";
 import { v4 as uuid } from "uuid";
-import { FamilyMember, HealthLog, Insight, UserRole } from "./types.js";
-import { generateInsights } from "./patterns.js";
+import { FamilyMember, HealthLog, Insight, UserRole, WeeklyDigest } from "./types.js";
 import {
   AutomationRunModel,
   AutomationSettingModel,
@@ -10,9 +9,14 @@ import {
   InsightSnapshotModel,
   ChatMessageModel,
   NotificationModel,
+  PrecomputedInsightModel,
+  WeeklyDigestModel,
   UserModel
 } from "./models.js";
-import { extractStructuredHealthSignal, generateGeminiInsights } from "./gemini.js";
+import { extractStructuredHealthSignal } from "./gemini.js";
+import { buildTimelineNarrative, type TimelineNarrativeEvent } from "./timeline-narrative.js";
+import { buildContextualReengagementPrompts, type ReengagementPrompt } from "./reengagement.js";
+import { buildDoctorVisitSummary } from "./doctor-summary.js";
 
 function mapMember(member: {
   _id: { toString: () => string };
@@ -39,9 +43,14 @@ function mapLog(log: {
   familyId: string;
   memberId: string;
   createdBy: string;
+  contributorId?: string;
+  contributorRole?: "owner" | "caregiver" | "viewer";
   text: string;
   type: "text" | "voice";
   tags?: string[];
+  audioUrl?: string | null;
+  transcript?: string | null;
+  transcriptionStatus?: "pending" | "processing" | "completed" | "failed";
   occurredAt: Date;
   createdAt: Date;
 }): HealthLog {
@@ -50,11 +59,118 @@ function mapLog(log: {
     familyId: log.familyId,
     memberId: log.memberId,
     createdBy: log.createdBy,
+    contributorId: log.contributorId || log.createdBy || "unknown",
+    contributorRole: log.contributorRole || "viewer",
     text: log.text,
     type: log.type,
     tags: log.tags || [],
+    audioUrl: log.audioUrl || undefined,
+    transcript: log.transcript || undefined,
+    transcriptionStatus: log.transcriptionStatus || undefined,
     occurredAt: log.occurredAt.toISOString(),
     createdAt: log.createdAt.toISOString()
+  };
+}
+
+function mapStoredInsight(insight: unknown): Insight {
+  const raw = insight as Partial<Insight> & { createdAt?: string | Date };
+  const createdAtRaw = (raw as { createdAt?: unknown }).createdAt;
+  return {
+    id: String(raw.id || ""),
+    familyId: String(raw.familyId || ""),
+    memberId: String(raw.memberId || ""),
+    type: (raw.type as Insight["type"]) || "trend",
+    title: String(raw.title || ""),
+    summary: String(raw.summary || raw.description || ""),
+    details: Array.isArray(raw.details) ? raw.details.map((d) => String(d)) : [],
+    priority: (raw.priority as Insight["priority"]) || "medium",
+    evidence: Array.isArray(raw.evidence) ? raw.evidence.map((id) => String(id)) : [],
+    description: String(raw.description || raw.summary || ""),
+    severity: (raw.severity as Insight["severity"]) || "warning",
+    keyword: String(raw.keyword || raw.type || "pattern"),
+    count: typeof raw.count === "number" ? raw.count : Array.isArray(raw.evidence) ? raw.evidence.length : 0,
+    confidence: typeof raw.confidence === "number" ? raw.confidence : 0,
+    sourceLogIds: Array.isArray((raw as { sourceLogIds?: unknown[] }).sourceLogIds)
+      ? ((raw as { sourceLogIds?: unknown[] }).sourceLogIds || []).map((id) => String(id))
+      : Array.isArray(raw.evidence)
+        ? raw.evidence.map((id) => String(id))
+        : [],
+    evidenceSnippets: Array.isArray((raw as { evidenceSnippets?: unknown[] }).evidenceSnippets)
+      ? ((raw as { evidenceSnippets?: unknown[] }).evidenceSnippets || [])
+          .map((item) => {
+            const row = item as { logId?: unknown; snippet?: unknown };
+            return {
+              logId: String(row.logId || ""),
+              snippet: String(row.snippet || "")
+            };
+          })
+          .filter((row) => row.logId.length > 0 && row.snippet.length > 0)
+      : undefined,
+    evidenceLogIds: Array.isArray(raw.evidenceLogIds)
+      ? raw.evidenceLogIds.map((id) => String(id))
+      : Array.isArray(raw.evidence)
+        ? raw.evidence.map((id) => String(id))
+        : [],
+    createdAt:
+      typeof createdAtRaw === "string"
+        ? createdAtRaw
+        : createdAtRaw instanceof Date
+          ? createdAtRaw.toISOString()
+          : new Date().toISOString(),
+    source: raw.source,
+    decisionReasons: Array.isArray(raw.decisionReasons)
+      ? raw.decisionReasons.map((r) => String(r))
+      : undefined
+  };
+}
+
+function mapWeeklyDigest(row: {
+  _id: { toString: () => string };
+  familyId: string;
+  userId: string;
+  personId: string;
+  title: string;
+  summary: string;
+  highlights: Array<{
+    type: "recurring" | "trend" | "new_symptom" | "resolved_symptom" | "red_flag" | "behavioral_change";
+    title: string;
+    description: string;
+    priority: "low" | "medium" | "high";
+    confidence: number;
+    evidenceLogIds: string[];
+    evidenceSnippets?: Array<{ logId: string; snippet: string }>;
+  }>;
+  comparison?: {
+    symptomIncrease?: string[];
+    symptomDecrease?: string[];
+    newlyAppeared?: string[];
+    resolved?: string[];
+  };
+  generatedAt: Date;
+}): WeeklyDigest {
+  return {
+    id: row._id.toString(),
+    familyId: row.familyId,
+    userId: row.userId,
+    personId: row.personId,
+    generatedAt: row.generatedAt.toISOString(),
+    title: row.title,
+    summary: row.summary,
+    highlights: (row.highlights || []).map((h) => ({
+      type: h.type,
+      title: h.title,
+      description: h.description,
+      priority: h.priority,
+      confidence: h.confidence,
+      evidenceLogIds: h.evidenceLogIds || [],
+      evidenceSnippets: h.evidenceSnippets || []
+    })),
+    comparison: {
+      symptomIncrease: row.comparison?.symptomIncrease || [],
+      symptomDecrease: row.comparison?.symptomDecrease || [],
+      newlyAppeared: row.comparison?.newlyAppeared || [],
+      resolved: row.comparison?.resolved || []
+    }
   };
 }
 
@@ -196,13 +312,71 @@ export async function listLogs(familyId: string, memberId?: string): Promise<Hea
   return result.map(mapLog);
 }
 
+export async function getLogById(familyId: string, logId: string): Promise<HealthLog | null> {
+  const result = await HealthLogModel.findOne({ _id: logId, familyId });
+  return result ? mapLog(result) : null;
+}
+
+export async function listTimelineNarrativeEvents(
+  familyId: string,
+  memberId: string
+): Promise<TimelineNarrativeEvent[]> {
+  const logs = await listLogs(familyId, memberId);
+  return buildTimelineNarrative(logs);
+}
+
+export async function getDoctorVisitSummary(
+  familyId: string,
+  memberId: string,
+  days = 30
+): Promise<{
+  title: string;
+  periodLabel: string;
+  generatedAt: string;
+  recurringSymptoms: Array<{ symptom: string; count: number }>;
+  trendAnalysis: Array<{ symptom: string; count: number; previousCount: number; trend: "increasing" | "decreasing" | "stable" }>;
+  majorChangesTimeline: Array<{ date: string; event: string; details: string }>;
+  medicationObservations: string[];
+  summary: string;
+} | null> {
+  const member = await FamilyMemberModel.findOne({ _id: memberId, familyId });
+  if (!member) return null;
+  const [logs, insights, timelineEvents] = await Promise.all([
+    listLogs(familyId, memberId),
+    listLatestPrecomputedInsightsForFamily(familyId).then((rows) => rows.filter((r) => r.memberId === memberId)),
+    listTimelineNarrativeEvents(familyId, memberId)
+  ]);
+  return buildDoctorVisitSummary({
+    memberName: member.name,
+    logs,
+    insights,
+    timelineEvents,
+    days
+  });
+}
+
 export async function createLog(
   familyId: string,
-  payload: Omit<HealthLog, "id" | "familyId" | "createdAt" | "tags"> & { tags?: string[]; audioBase64?: string }
+  payload: {
+    memberId: string;
+    createdBy: string;
+    text: string;
+    type: "text" | "voice";
+    occurredAt: string;
+    transcript?: string;
+    transcriptionStatus?: "pending" | "processing" | "completed" | "failed";
+    audioUrl?: string;
+    tags?: string[];
+    audioBase64?: string;
+    contributorId?: string;
+    contributorRole?: UserRole;
+  }
 ): Promise<HealthLog> {
   const log = await HealthLogModel.create({
     familyId,
     ...payload,
+    contributorId: payload.contributorId || payload.createdBy || "unknown",
+    contributorRole: payload.contributorRole || "viewer",
     tags: payload.tags || [],
     occurredAt: new Date(payload.occurredAt)
   });
@@ -229,41 +403,50 @@ export async function updateLog(
   return updated ? mapLog(updated) : null;
 }
 
+export async function deleteLog(familyId: string, logId: string): Promise<HealthLog | null> {
+  const removed = await HealthLogModel.findOneAndDelete({ _id: logId, familyId });
+  return removed ? mapLog(removed) : null;
+}
+
 export async function listInsights(familyId: string): Promise<Insight[]> {
-  const members = await listMembers(familyId);
-  const allLogs = await listLogs(familyId);
+  return listLatestPrecomputedInsightsForFamily(familyId);
+}
 
-  const deterministic = members.flatMap((member) =>
-    generateInsights(familyId, member.id, member.name, allLogs).map((insight) => ({
-      ...insight,
-      id: `${member.id}-${insight.keyword.replace(/\s+/g, "-")}`
-    }))
-  );
+export async function listPrecomputedInsightsForUser(
+  familyId: string,
+  userId: string
+): Promise<Insight[]> {
+  const rows = await PrecomputedInsightModel.find({ familyId, userId }).sort({ generatedAt: -1 });
+  return rows
+    .flatMap((row) => ((row.insights as unknown[]) || []).map(mapStoredInsight))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 16);
+}
 
-  const ruleKeys = new Set(
-    deterministic.map((i) => `${i.memberId}::${i.keyword.trim().toLowerCase()}`)
-  );
+export async function listDigestsForUserPerson(
+  familyId: string,
+  userId: string,
+  personId: string
+): Promise<WeeklyDigest[]> {
+  const rows = await WeeklyDigestModel.find({ familyId, userId, personId }).sort({ generatedAt: -1 }).limit(12);
+  return rows.map(mapWeeklyDigest);
+}
 
-  const geminiForEachMember = await Promise.all(
-    members.map(async (member) => {
-      const memberLogs = allLogs.filter((l) => l.memberId === member.id);
-      try {
-        return await generateGeminiInsights(familyId, member.id, member.name, memberLogs);
-      } catch {
-        return [];
-      }
-    })
-  );
-
-  const modelInsights = geminiForEachMember
-    .flat()
-    .filter((g) => !ruleKeys.has(`${g.memberId}::${g.keyword.trim().toLowerCase()}`));
-
-  return [...deterministic, ...modelInsights].sort((a, b) => b.count - a.count).slice(0, 16);
+export async function listLatestPrecomputedInsightsForFamily(familyId: string): Promise<Insight[]> {
+  const rows = await PrecomputedInsightModel.find({ familyId }).sort({ generatedAt: -1 });
+  const byPerson = new Map<string, Insight[]>();
+  for (const row of rows) {
+    if (byPerson.has(row.personId)) continue;
+    byPerson.set(
+      row.personId,
+      ((row.insights as unknown[]) || []).map(mapStoredInsight).slice(0, 16)
+    );
+  }
+  return [...byPerson.values()].flat().sort((a, b) => b.count - a.count).slice(0, 16);
 }
 
 export async function cacheInsightsSnapshot(familyId: string): Promise<void> {
-  const insights = await listInsights(familyId);
+  const insights = await listLatestPrecomputedInsightsForFamily(familyId);
   await InsightSnapshotModel.create({
     familyId,
     generatedAt: new Date(),
@@ -274,11 +457,11 @@ export async function cacheInsightsSnapshot(familyId: string): Promise<void> {
 export async function getLatestInsightsSnapshot(familyId: string): Promise<Insight[] | null> {
   const latest = await InsightSnapshotModel.findOne({ familyId }).sort({ generatedAt: -1 });
   if (!latest) return null;
-  return latest.insights as Insight[];
+  return ((latest.insights as unknown[]) || []).map(mapStoredInsight);
 }
 
 export async function getAllActiveFamilyIds(): Promise<string[]> {
-  const ids = await HealthLogModel.distinct("familyId");
+  const ids = await UserModel.distinct("familyId");
   return ids.filter((x): x is string => typeof x === "string" && x.length > 0);
 }
 
@@ -453,6 +636,20 @@ export async function listNotifications(familyId: string): Promise<
   }));
 }
 
+export async function listContextualReengagementPrompts(familyId: string): Promise<ReengagementPrompt[]> {
+  const [members, logs, insights] = await Promise.all([
+    listMembers(familyId),
+    listLogs(familyId),
+    listLatestPrecomputedInsightsForFamily(familyId)
+  ]);
+  return buildContextualReengagementPrompts({
+    familyId,
+    members,
+    logs,
+    insights
+  });
+}
+
 export async function markNotificationRead(familyId: string, notificationId: string): Promise<void> {
   await NotificationModel.updateOne({ _id: notificationId, familyId }, { $set: { isRead: true } });
 }
@@ -486,7 +683,7 @@ export async function runAutomationAnalysis(
 ): Promise<{ insightsGenerated: number; notificationsCreated: number }> {
   try {
     const settings = await getAutomationSettings(familyId);
-    const insights = await listInsights(familyId);
+    const insights = await listLatestPrecomputedInsightsForFamily(familyId);
     await cacheInsightsSnapshot(familyId);
 
     const filtered = insights.filter(
@@ -518,7 +715,30 @@ export async function runAutomationAnalysis(
       if (creates.length) {
         await NotificationModel.insertMany(creates);
       }
-      notificationsCreated = creates.length;
+      const reengagementPrompts = buildContextualReengagementPrompts({
+        familyId,
+        members: await listMembers(familyId),
+        logs: await listLogs(familyId),
+        insights
+      });
+      const existingPromptNotifications = await NotificationModel.find({
+        familyId,
+        insightId: { $in: reengagementPrompts.map((p) => p.id) },
+        createdAt: { $gte: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) }
+      });
+      const existingPromptIds = new Set(existingPromptNotifications.map((n) => n.insightId));
+      const promptCreates = reengagementPrompts
+        .filter((prompt) => !existingPromptIds.has(prompt.id))
+        .map((prompt) => ({
+          familyId,
+          memberId: prompt.memberId,
+          insightId: prompt.id,
+          severity: prompt.severity,
+          message: prompt.prompt,
+          isRead: false
+        }));
+      if (promptCreates.length) await NotificationModel.insertMany(promptCreates);
+      notificationsCreated = creates.length + promptCreates.length;
     }
 
     await AutomationRunModel.create({

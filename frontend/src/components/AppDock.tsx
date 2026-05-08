@@ -10,10 +10,10 @@ export default function AppDock() {
   const alertCount = getAllInsights().filter((i) => i.severity === "alert").length;
 
   const items = [
-    { label: "Home", icon: Activity, path: "/" },
-    { label: "Patterns", icon: Sparkles, path: "/insights", badge: alertCount },
-    { label: "Team", icon: ShieldCheck, path: "/team" },
-    { label: "AI", icon: Bot, path: "/automation" },
+    { label: "Dashboard", icon: Activity, path: "/" },
+    { label: "Insights", icon: Sparkles, path: "/insights", badge: alertCount },
+    { label: "Care Team", icon: ShieldCheck, path: "/team" },
+    { label: "Automation", icon: Bot, path: "/automation" },
   ];
   if (user?.role === "owner") {
     items.push({ label: "Admin", icon: Crown, path: "/admin" });

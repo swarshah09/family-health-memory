@@ -33,6 +33,8 @@ export default function Dashboard() {
     const last = new Date(logsForMember[0].timestamp).getTime();
     return Date.now() - last > 1000 * 60 * 60 * 24 * 3;
   });
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
   return (
     <div className="app-shell app-safe-bottom">
@@ -54,7 +56,7 @@ export default function Dashboard() {
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.2 }}
             >
-              <p className="text-primary-foreground/70 text-sm font-medium">Good morning,</p>
+              <p className="text-primary-foreground/70 text-sm font-medium">{greeting},</p>
               <h1 className="text-2xl font-display font-bold text-primary-foreground">{user?.name || "User"} 👋</h1>
             </motion.div>
             <motion.button
@@ -87,9 +89,9 @@ export default function Dashboard() {
                 </motion.div>
                 <div className="flex-1 text-left">
                   <p className="text-primary-foreground text-sm font-semibold">
-                    {alertCount} pattern{alertCount > 1 ? "s" : ""} detected
+                    {alertCount} priority insight{alertCount > 1 ? "s" : ""} detected
                   </p>
-                  <p className="text-primary-foreground/60 text-xs">Tap to review AI insights →</p>
+                  <p className="text-primary-foreground/60 text-xs">Review observations and evidence</p>
                 </div>
                 <div className="h-8 w-8 rounded-full bg-primary-foreground/20 flex items-center justify-center">
                   <span className="text-xs font-bold text-primary-foreground">{alertCount}</span>
@@ -158,21 +160,21 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
           >
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Weekly brief</p>
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Weekly snapshot</p>
             <p className="text-sm font-medium text-foreground mt-1">{topInsight.title}</p>
             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{topInsight.description}</p>
           </motion.button>
         )}
         {inactiveMembers.length > 0 && (
           <div className="mb-4 glass-card rounded-2xl p-4 border border-warning/20 border-l-4 border-l-warning">
-            <p className="text-[10px] uppercase tracking-widest text-warning font-semibold">Smart Reminder</p>
+            <p className="text-[10px] uppercase tracking-widest text-warning font-semibold">Follow-up suggestion</p>
             <p className="text-sm text-foreground mt-1">
-              No recent updates for {inactiveMembers.map((m) => m.name).join(", ")}. Add a quick check-in log.
+              No recent updates for {inactiveMembers.map((m) => m.name).join(", ")}. Add a quick check-in to keep the timeline current.
             </p>
           </div>
         )}
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-display font-bold text-foreground">Family Members</h2>
+          <h2 className="section-title">People You Track</h2>
           <motion.div whileTap={{ scale: 0.95 }}>
             <Button
               size="sm"

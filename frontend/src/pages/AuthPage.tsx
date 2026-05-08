@@ -86,7 +86,7 @@ export default function AuthPage() {
             </motion.div>
           </div>
           <h1 className="text-3xl font-display font-bold text-white">Family Health Memory</h1>
-          <p className="text-white/65 text-sm mt-1.5 font-medium tracking-[0.22em] uppercase">Catch quiet patterns</p>
+          <p className="text-white/65 text-sm mt-1.5 font-medium tracking-[0.16em] uppercase">Shared care timeline and insights</p>
         </motion.div>
 
         {/* Form card */}
@@ -146,7 +146,7 @@ export default function AuthPage() {
                   />
                 ) : (
                   <>
-                    {mode === "login" ? "Sign In" : "Create Account"}
+                    {mode === "login" ? "Sign in securely" : "Create account"}
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
@@ -182,7 +182,7 @@ export default function AuthPage() {
         </div>
 
         <p className="text-center text-[11px] text-white/55 mt-8">
-          This is not a medical tool
+          Observation support only - not medical diagnosis
         </p>
       </motion.div>
     </div>

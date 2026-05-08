@@ -98,6 +98,15 @@
     @apply bg-background text-foreground font-sans antialiased;
   }
 
+  button,
+  [role="button"],
+  a,
+  input,
+  select,
+  textarea {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
   html {
     font-family: 'Inter', system-ui, sans-serif;
   }
@@ -123,6 +132,22 @@
   .glass-card-hover:hover {
     @apply shadow-lg border-primary/20;
     transform: translateY(-2px);
+  }
+
+  .section-title {
+    @apply text-base font-display font-semibold text-foreground tracking-tight;
+  }
+
+  .section-subtitle {
+    @apply text-xs text-muted-foreground;
+  }
+
+  .chip-soft {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-[10px] border border-border/60 bg-muted/60 text-muted-foreground;
+  }
+
+  .interactive-row {
+    @apply transition-all duration-200 hover:border-primary/30 hover:bg-primary/5;
   }
 
   .health-gradient {
@@ -278,6 +303,10 @@
 
   .dock-item-active .dock-label {
     @apply font-semibold;
+  }
+
+  .dock-item-idle .dock-icon:hover {
+    @apply bg-muted/70;
   }
 
   .dock-badge {

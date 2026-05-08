@@ -130,7 +130,9 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
         setVoiceFile(null);
         setSelectedTags([]);
         setIsRecording(false);
-        toast.success("Voice log uploaded", { description: `Added voice note for ${member?.name}` });
+        toast.success("Voice log uploaded", {
+          description: `Added voice note for ${member?.name}. Transcript will update shortly.`
+        });
         onClose();
       })
       .catch(() => toast.error("Failed to upload voice log."));

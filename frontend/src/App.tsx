@@ -8,6 +8,7 @@ import AppDock from "@/components/AppDock";
 import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
 import MemberDetail from "./pages/MemberDetail";
+import DoctorSummaryPage from "./pages/DoctorSummaryPage";
 import InsightsPage from "./pages/InsightsPage";
 import TeamPage from "./pages/TeamPage";
 import AutomationPage from "./pages/AutomationPage";
@@ -37,6 +38,7 @@ function AppRoutes() {
         <Route element={<AuthedLayout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/member/:id" element={<MemberDetail />} />
+          <Route path="/member/:id/doctor-summary" element={<DoctorSummaryPage />} />
           <Route path="/insights" element={<InsightsPage />} />
           <Route path="/team" element={<TeamPage />} />
           <Route path="/automation" element={<AutomationPage />} />

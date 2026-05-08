@@ -12,17 +12,28 @@ export interface FamilyMember {
 export interface HealthLog {
   id: string;
   memberId: string;
+  contributorId: string;
+  contributorRole: "owner" | "caregiver" | "viewer";
   text: string;
   timestamp: string;
   type: "text" | "voice";
   tags?: string[];
   audioUrl?: string;
+  transcript?: string;
+  transcriptionStatus?: "pending" | "processing" | "completed" | "failed";
 }
 
 export interface Insight {
   id: string;
   memberId: string;
+  type?: "trend" | "frequency" | "correlation" | "anomaly" | "red_flag";
   title: string;
+  summary?: string;
+  details?: string[];
+  priority?: "low" | "medium" | "high";
+  evidence?: string[];
+  sourceLogIds?: string[];
+  evidenceSnippets?: Array<{ logId: string; snippet: string }>;
   description: string;
   severity: "info" | "warning" | "alert";
   keyword: string;
@@ -35,7 +46,7 @@ export interface Insight {
 
 interface AppState {
   isAuthenticated: boolean;
-  user: { email: string; name: string; familyId: string; role?: "owner" | "caregiver" | "viewer" } | null;
+  user: { id?: string; email: string; name: string; familyId: string; role?: "owner" | "caregiver" | "viewer" } | null;
   members: FamilyMember[];
   logs: HealthLog[];
   login: (email: string, password: string) => Promise<void>;
@@ -44,8 +55,9 @@ interface AppState {
   addMember: (member: Omit<FamilyMember, "id">) => Promise<void>;
   updateMember: (id: string, member: Omit<FamilyMember, "id">) => Promise<void>;
   removeMember: (id: string) => Promise<void>;
-  addLog: (log: Omit<HealthLog, "id" | "timestamp">) => Promise<void>;
+  addLog: (log: { memberId: string; text: string; type: "text" | "voice"; tags?: string[] }) => Promise<void>;
   updateLog: (id: string, updates: { text: string; tags: string[] }) => Promise<void>;
+  removeLog: (id: string) => Promise<void>;
   addVoiceLog: (memberId: string, file: File, transcript?: string) => Promise<void>;
   familyUsers: Array<{ id: string; email: string; name: string; role: "owner" | "caregiver" | "viewer" }>;
   loadFamilyUsers: (ctx?: {
@@ -63,10 +75,12 @@ interface AppState {
     role: "caregiver" | "viewer"
   ) => Promise<{ temporaryPassword?: string }>;
   getLogsForMember: (memberId: string) => HealthLog[];
+  hasPendingVoiceLogs: (memberId?: string) => boolean;
   getInsightsForMember: (memberId: string) => Insight[];
   getAllInsights: () => Insight[];
   refreshFamilyData: () => Promise<void>;
   insightsLoading: boolean;
+  lastDataRefreshAt: number | null;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -75,7 +89,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState<{ email: string; name: string; familyId: string; role?: "owner" | "caregiver" | "viewer" } | null>(null);
+  const [user, setUser] = useState<{ id?: string; email: string; name: string; familyId: string; role?: "owner" | "caregiver" | "viewer" } | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem("fhm_access_token"));
   const [refreshToken, setRefreshToken] = useState<string | null>(
     localStorage.getItem("fhm_refresh_token")
@@ -84,6 +98,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [logs, setLogs] = useState<HealthLog[]>([]);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [insightsLoading, setInsightsLoading] = useState(false);
+  const [lastDataRefreshAt, setLastDataRefreshAt] = useState<number | null>(null);
   const [familyUsers, setFamilyUsers] = useState<Array<{ id: string; email: string; name: string; role: "owner" | "caregiver" | "viewer" }>>([]);
 
   const refreshAccessToken = async (): Promise<string | null> => {
@@ -159,20 +174,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const insightsJson = await insightsRes.json();
 
       setMembers(membersJson.members || []);
-      setLogs((logsJson.logs || []).map((log: { id: string; memberId: string; text: string; type: "text" | "voice"; occurredAt: string; tags?: string[] }) => ({
-        id: log.id,
-        memberId: log.memberId,
-        text: log.text,
-        type: log.type,
-        timestamp: log.occurredAt,
-        tags: log.tags || [],
-      })));
+      setLogs(
+        (logsJson.logs || []).map(
+          (log: {
+            id: string;
+            memberId: string;
+            contributorId?: string;
+            contributorRole?: "owner" | "caregiver" | "viewer";
+            text: string;
+            type: "text" | "voice";
+            occurredAt: string;
+            tags?: string[];
+            audioUrl?: string;
+            transcript?: string;
+            transcriptionStatus?: "pending" | "processing" | "completed" | "failed";
+          }) => ({
+            id: log.id,
+            memberId: log.memberId,
+            contributorId: log.contributorId || "unknown",
+            contributorRole: log.contributorRole || "viewer",
+            text: log.text,
+            type: log.type,
+            timestamp: log.occurredAt,
+            tags: log.tags || [],
+            audioUrl: log.audioUrl,
+            transcript: log.transcript,
+            transcriptionStatus: log.transcriptionStatus
+          })
+        )
+      );
       setInsights(
         (insightsJson.insights || []).map(
           (ins: {
             id: string;
             memberId: string;
+            type?: Insight["type"];
             title: string;
+            summary?: string;
+            details?: string[];
+            priority?: Insight["priority"];
+            evidence?: string[];
+            sourceLogIds?: string[];
+            evidenceSnippets?: Array<{ logId: string; snippet: string }>;
             description: string;
             severity: Insight["severity"];
             keyword: string;
@@ -183,17 +226,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }) => ({
             id: ins.id,
             memberId: ins.memberId,
+            type: ins.type,
             title: ins.title,
-            description: ins.description,
-            severity: ins.severity,
-            keyword: ins.keyword,
-            count: ins.count,
+            summary: ins.summary,
+            details: ins.details,
+            priority: ins.priority,
+            evidence: ins.evidence,
+            sourceLogIds: ins.sourceLogIds,
+            evidenceSnippets: ins.evidenceSnippets,
+            description: ins.description || ins.summary || "",
+            severity:
+              ins.severity ||
+              (ins.priority === "high" ? "alert" : ins.priority === "medium" ? "warning" : "info"),
+            keyword: ins.keyword || ins.type || "pattern",
+            count: typeof ins.count === "number" ? ins.count : (ins.evidence || []).length,
             confidence: ins.confidence,
             date: ins.createdAt,
             source: ins.source,
           })
         )
       );
+      setLastDataRefreshAt(Date.now());
     } finally {
       setInsightsLoading(false);
     }
@@ -202,7 +255,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const rawUser = localStorage.getItem("fhm_user");
     if (rawUser && (token || localStorage.getItem("fhm_access_token"))) {
-      const parsedUser = JSON.parse(rawUser) as { email: string; name: string; familyId: string; role?: "owner" | "caregiver" | "viewer" };
+      const parsedUser = JSON.parse(rawUser) as { id?: string; email: string; name: string; familyId: string; role?: "owner" | "caregiver" | "viewer" };
       setUser(parsedUser);
       setIsAuthenticated(true);
       hydrateFromApi(parsedUser.familyId).catch(() => {});
@@ -213,6 +266,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  useEffect(() => {
+    if (!user || !isAuthenticated) return;
+    if (!hasPendingVoiceLogs()) return;
+    const timer = setInterval(() => {
+      hydrateFromApi(user.familyId).catch(() => {});
+    }, 3500);
+    return () => clearInterval(timer);
+  }, [user?.familyId, isAuthenticated, logs]);
+
   const login = async (email: string, password: string) => {
     const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
       method: "POST",
@@ -222,6 +284,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!res.ok) throw new Error("Login failed");
     const json = await res.json();
     const nextUser = {
+      id: json.user.id as string | undefined,
       email: json.user.email as string,
       name: json.user.name as string,
       familyId: json.user.familyId as string,
@@ -249,6 +312,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!res.ok) throw new Error("Signup failed");
     const json = await res.json();
     const nextUser = {
+      id: json.user.id as string | undefined,
       email: json.user.email as string,
       name: json.user.name as string,
       familyId: json.user.familyId as string,
@@ -320,7 +384,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await hydrateFromApi(user.familyId);
   };
 
-  const addLog = async (log: Omit<HealthLog, "id" | "timestamp">) => {
+  const addLog = async (log: { memberId: string; text: string; type: "text" | "voice"; tags?: string[] }) => {
     if (!user) throw new Error("Not authenticated");
     const response = await apiFetch(`${API_BASE_URL}/api/families/${user.familyId}/logs`, {
       method: "POST",
@@ -350,6 +414,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ text: updates.text, tags: updates.tags })
     });
     await ensureOk(response, "Failed to update log");
+    await hydrateFromApi(user.familyId);
+  };
+
+  const removeLog = async (id: string) => {
+    if (!user) throw new Error("Not authenticated");
+    const response = await apiFetch(`${API_BASE_URL}/api/families/${user.familyId}/logs/${id}`, {
+      method: "DELETE"
+    });
+    await ensureOk(response, "Failed to delete log");
     await hydrateFromApi(user.familyId);
   };
 
@@ -426,6 +499,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .filter((l) => l.memberId === memberId)
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
+  const hasPendingVoiceLogs = (memberId?: string) =>
+    logs.some(
+      (l) =>
+        l.type === "voice" &&
+        (memberId ? l.memberId === memberId : true) &&
+        (l.transcriptionStatus === "pending" || l.transcriptionStatus === "processing")
+    );
+
   const getInsightsForMember = useMemo(
     () => (memberId: string) => insights.filter((insight) => insight.memberId === memberId),
     [insights]
@@ -442,10 +523,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       value={{
         isAuthenticated, user, members, logs,
         login, signup, logout, addMember, updateMember, removeMember,
-        addLog, updateLog, addVoiceLog, familyUsers, loadFamilyUsers, updateFamilyUserRole, inviteFamilyUser,
-        getLogsForMember, getInsightsForMember, getAllInsights,
+        addLog, updateLog, removeLog, addVoiceLog, familyUsers, loadFamilyUsers, updateFamilyUserRole, inviteFamilyUser,
+        getLogsForMember, hasPendingVoiceLogs, getInsightsForMember, getAllInsights,
         refreshFamilyData,
         insightsLoading,
+        lastDataRefreshAt,
       }}
     >
       {children}
