@@ -69,11 +69,13 @@ const InsightOutputSchema = z.object({
 export type InsightOutput = z.infer<typeof InsightOutputSchema>;
 
 type InsightItem = z.infer<typeof InsightItemSchema>;
+type EvidenceSnippet = { logId: string; snippet: string };
+type NormalizedInsight = InsightItem & { evidenceSnippets: EvidenceSnippet[] };
 
 function buildEvidenceSnippets(
   sourceLogIds: string[],
   logTextById: Map<string, string>
-): Array<{ logId: string; snippet: string }> {
+): EvidenceSnippet[] {
   return sourceLogIds
     .slice(0, 3)
     .map((id) => {
@@ -169,24 +171,24 @@ ${JSON.stringify(params.correlations, null, 2)}`;
     ...params.correlations.correlations.flatMap((item) => item.sourceLogIds)
   ]);
   const isValidId = (id: string) => (validLogIds.size ? validLogIds.has(id) : knownSourceIds.has(id));
-  const normalized = merged
-    .map((ins) => {
+  const normalizedMapped: Array<NormalizedInsight | null> = merged.map((ins) => {
       const sourceLogIds = [...new Set((ins.sourceLogIds || []).filter((id) => isValidId(id)))];
       const evidence = [...new Set((ins.evidence || sourceLogIds).filter((id) => isValidId(id)))];
       const finalSourceLogIds = sourceLogIds.length ? sourceLogIds : evidence;
       if (!finalSourceLogIds.length) return null;
-      const evidenceSnippets =
-        ins.evidenceSnippets?.filter((s) => finalSourceLogIds.includes(s.logId)) ||
-        buildEvidenceSnippets(finalSourceLogIds, logTextById);
+      const evidenceSnippets = ins.evidenceSnippets?.filter((s) => finalSourceLogIds.includes(s.logId));
       return {
         ...ins,
         evidence: evidence.length ? evidence : finalSourceLogIds,
         sourceLogIds: finalSourceLogIds,
-        evidenceSnippets
+        evidenceSnippets:
+          evidenceSnippets && evidenceSnippets.length > 0
+            ? evidenceSnippets
+            : buildEvidenceSnippets(finalSourceLogIds, logTextById)
       };
-    })
-    .filter((ins): ins is InsightItem => Boolean(ins));
-  const dedupedByTypeAndKeyword = new Map<string, (typeof merged)[number]>();
+    });
+  const normalized = normalizedMapped.filter((ins): ins is NormalizedInsight => ins !== null);
+  const dedupedByTypeAndKeyword = new Map<string, NormalizedInsight>();
   for (const ins of normalized) {
     const key = `${ins.type}:${(ins.keyword || "").trim().toLowerCase()}`;
     const existing = dedupedByTypeAndKeyword.get(key);

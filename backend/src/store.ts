@@ -145,7 +145,7 @@ function mapWeeklyDigest(row: {
     symptomDecrease?: string[];
     newlyAppeared?: string[];
     resolved?: string[];
-  };
+  } | null;
   generatedAt: Date;
 }): WeeklyDigest {
   return {
