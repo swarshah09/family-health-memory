@@ -4,6 +4,7 @@ import { useApp } from "@/context/AppContext";
 import { ArrowLeft, Shield, Users, Crown, HeartHandshake, Eye, CheckCircle2, Circle } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import { toastError, toastFromCaughtError } from "@/lib/toast-errors";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,7 +45,10 @@ export default function TeamPage() {
   const confirmOwnerRoleChange = () => {
     if (!roleChangePending || submittingRoleChange) return;
     if (!currentPassword.trim()) {
-      toast.error("Current password is required");
+      toastError(
+        "Password required",
+        "Enter your current account password to confirm this change to owner-level access."
+      );
       return;
     }
     setSubmittingRoleChange(true);
@@ -54,7 +58,13 @@ export default function TeamPage() {
         setRoleChangePending(null);
         setCurrentPassword("");
       })
-      .catch((err: Error) => toast.error(err.message || "Role update failed"))
+      .catch((err: unknown) =>
+        toastFromCaughtError(
+          err,
+          "Role not updated",
+          "We could not change this contributor's role. If your account password was requested, confirm it is correct and try again."
+        )
+      )
       .finally(() => setSubmittingRoleChange(false));
   };
 
@@ -181,7 +191,10 @@ export default function TeamPage() {
                 className="h-10 rounded-xl bg-accent hover:bg-accent/90"
                 onClick={() => {
                   if (!inviteName.trim() || !inviteEmail.trim()) {
-                    toast.error("Name and email are required");
+                    toastError(
+                      "Missing invite details",
+                      "Enter both the contributor's full name and email address before sending an invitation."
+                    );
                     return;
                   }
                   inviteFamilyUser(inviteEmail.trim(), inviteName.trim(), inviteRole)
@@ -194,7 +207,13 @@ export default function TeamPage() {
                           : "Existing family member updated."
                       });
                     })
-                    .catch(() => toast.error("Invite failed"));
+                    .catch((err: unknown) =>
+                      toastFromCaughtError(
+                        err,
+                        "Invitation not sent",
+                        "We could not send this invite. Check the email address and your connection, then try again."
+                      )
+                    );
                 }}
               >
                 Send Invite
@@ -236,7 +255,13 @@ export default function TeamPage() {
                     if (!ownerSensitive) {
                       updateFamilyUserRole(member.id, nextRole)
                         .then(() => toast.success(`Role updated for ${member.name}`))
-                        .catch((err: Error) => toast.error(err.message || "Role update failed"));
+                        .catch((err: unknown) =>
+                          toastFromCaughtError(
+                            err,
+                            "Role not updated",
+                            "We could not change this contributor's role. You may need owner permissions or a fresh session."
+                          )
+                        );
                       return;
                     }
                     setRoleChangePending({ userId: member.id, name: member.name, nextRole });

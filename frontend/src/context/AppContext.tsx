@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, createContext, useContext, ReactNode } from "react";
+import { AppRequestError, authHttpFailure } from "@/lib/toast-errors";
 
 export interface FamilyMember {
   id: string;
@@ -281,7 +282,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     });
-    if (!res.ok) throw new Error("Login failed");
+    if (!res.ok) {
+      const { title, description } = await authHttpFailure(res, "login");
+      throw new AppRequestError(title, description);
+    }
     const json = await res.json();
     const nextUser = {
       id: json.user.id as string | undefined,
@@ -309,7 +313,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, name, password }),
     });
-    if (!res.ok) throw new Error("Signup failed");
+    if (!res.ok) {
+      const { title, description } = await authHttpFailure(res, "signup");
+      throw new AppRequestError(title, description);
+    }
     const json = await res.json();
     const nextUser = {
       id: json.user.id as string | undefined,

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Mic, Send } from "lucide-react";
 import { toast } from "sonner";
+import { toastFromCaughtError } from "@/lib/toast-errors";
 
 interface EditLogDialogProps {
   open: boolean;
@@ -35,7 +36,13 @@ export default function EditLogDialog({ open, onClose, log }: EditLogDialogProps
         toast.success("Log updated", { description: `Saved changes for ${member?.name || "member"}` });
         onClose();
       })
-      .catch(() => toast.error("Failed to update log. Check backend connection."));
+      .catch((err: unknown) =>
+        toastFromCaughtError(
+          err,
+          "Changes not saved",
+          "We could not update this observation. Check your connection and try again."
+        )
+      );
   };
 
   return (

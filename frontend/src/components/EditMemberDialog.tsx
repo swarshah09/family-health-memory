@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PencilLine, Save } from "lucide-react";
 import { toast } from "sonner";
+import { toastFromCaughtError } from "@/lib/toast-errors";
 
 interface EditMemberDialogProps {
   open: boolean;
@@ -41,7 +42,13 @@ export default function EditMemberDialog({ open, onClose, member }: EditMemberDi
         toast.success(`${name.trim()} updated`);
         onClose();
       })
-      .catch(() => toast.error("Failed to update member details."));
+      .catch((err: unknown) =>
+        toastFromCaughtError(
+          err,
+          "Profile not updated",
+          "We could not save changes to this family member. Check your connection and try again."
+        )
+      );
   };
 
   return (

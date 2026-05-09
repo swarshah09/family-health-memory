@@ -13,6 +13,7 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { toastError, toastFromCaughtError, toastFromFailedResponse } from "@/lib/toast-errors";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -83,20 +84,34 @@ export default function ChatIngestPage() {
     if (!user || !message.trim()) return;
     if (!token) return;
 
-    const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/chat/ingest`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        senderName: senderName.trim() || "Family Member",
-        text: message.trim()
-      })
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/chat/ingest`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          senderName: senderName.trim() || "Family Member",
+          text: message.trim()
+        })
+      });
+    } catch (err: unknown) {
+      toastFromCaughtError(
+        err,
+        "Message not sent",
+        "We could not reach the server to record your message."
+      );
+      return;
+    }
 
     if (!response.ok) {
-      toast.error("Could not submit message");
+      await toastFromFailedResponse(
+        response,
+        "Message not recorded",
+        "We could not process this chat message. Try again or shorten the text."
+      );
       return;
     }
 
@@ -112,7 +127,10 @@ export default function ChatIngestPage() {
     if (!user || !token || !canResolve) return;
     const memberId = memberChoice[messageId];
     if (!memberId) {
-      toast.error("Choose a family member");
+      toastError(
+        "Select a family member",
+        "Choose which person this message should be linked to before creating the health log."
+      );
       return;
     }
     setResolvingId(messageId);
@@ -129,12 +147,22 @@ export default function ChatIngestPage() {
         }
       );
       if (!response.ok) {
-        toast.error("Could not create log from message");
+        await toastFromFailedResponse(
+          response,
+          "Health log not created",
+          "We could not attach this message to the selected member. Try again or pick a different member."
+        );
         return;
       }
       toast.success("Health log created");
       await loadPending();
       await refreshFamilyData();
+    } catch (err: unknown) {
+      toastFromCaughtError(
+        err,
+        "Health log not created",
+        "We could not reach the server to create this log from the message."
+      );
     } finally {
       setResolvingId(null);
     }
@@ -152,11 +180,21 @@ export default function ChatIngestPage() {
         }
       );
       if (!response.ok) {
-        toast.error("Could not dismiss");
+        await toastFromFailedResponse(
+          response,
+          "Item not dismissed",
+          "We could not remove this message from the review queue."
+        );
         return;
       }
       toast.success("Removed from review");
       await loadPending();
+    } catch (err: unknown) {
+      toastFromCaughtError(
+        err,
+        "Item not dismissed",
+        "We could not reach the server to dismiss this review item."
+      );
     } finally {
       setResolvingId(null);
     }

@@ -2,9 +2,9 @@ import { useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Heart, ArrowRight, Sparkles } from "lucide-react";
+import { Heart, ArrowRight, Sparkles, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { toast } from "sonner";
+import { AppRequestError, toastError, toastFromCaughtError } from "@/lib/toast-errors";
 
 export default function AuthPage() {
   const { login, signup } = useApp();
@@ -12,6 +12,7 @@ export default function AuthPage() {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -21,8 +22,16 @@ export default function AuthPage() {
       await new Promise((r) => setTimeout(r, 400));
       if (mode === "login") await login(email, password);
       else await signup(email, name, password);
-    } catch {
-      toast.error("Unable to connect to backend. Please start the API server.");
+    } catch (err) {
+      if (err instanceof AppRequestError) {
+        toastError(err.toastTitle, err.toastDescription);
+      } else {
+        toastFromCaughtError(
+          err,
+          "We could not complete your request",
+          "Check your network connection. If you are running the app locally, confirm the API server is started."
+        );
+      }
     } finally {
       setIsLoading(false);
     }
@@ -124,14 +133,25 @@ export default function AuthPage() {
               required
               className="h-12 bg-background/60 border-border/60 rounded-xl focus:border-primary/40 focus:ring-primary/20"
             />
-            <Input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="h-12 bg-background/60 border-border/60 rounded-xl focus:border-primary/40 focus:ring-primary/20"
-            />
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="h-12 pr-11 bg-background/60 border-border/60 rounded-xl focus:border-primary/40 focus:ring-primary/20"
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-1 top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
             <motion.div whileTap={{ scale: 0.98 }}>
               <Button
                 type="submit"

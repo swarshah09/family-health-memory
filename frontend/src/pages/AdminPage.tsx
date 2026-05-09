@@ -15,6 +15,7 @@ import {
   Users
 } from "lucide-react";
 import { toast } from "sonner";
+import { toastError, toastFromCaughtError, toastFromFailedResponse } from "@/lib/toast-errors";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -201,7 +202,11 @@ export default function AdminPage() {
       }
     );
     if (!response.ok) {
-      toast.error("Failed to load audit logs");
+      await toastFromFailedResponse(
+        response,
+        "Audit logs unavailable",
+        "We could not load audit records for your family. Confirm you are still signed in as owner."
+      );
       return;
     }
     const json = await response.json();
@@ -225,7 +230,11 @@ export default function AdminPage() {
         }
       );
       if (!response.ok) {
-        toast.error("Failed to load AI observability");
+        await toastFromFailedResponse(
+          response,
+          "AI observability unavailable",
+          "We could not load pipeline metrics for the selected period."
+        );
         return;
       }
       const json = (await response.json()) as AIObservabilitySummary;
@@ -237,7 +246,10 @@ export default function AdminPage() {
 
   const exportCsv = (filename: string, rows: Array<Record<string, unknown>>) => {
     if (!rows.length) {
-      toast.error("Nothing to export");
+      toastError(
+        "Nothing to export",
+        "There is no data in the current list to include in a CSV file. Adjust filters or add records first."
+      );
       return;
     }
     const keys = Object.keys(rows[0]);
@@ -299,12 +311,25 @@ export default function AdminPage() {
 
   const runNow = async () => {
     if (!user || !token) return;
-    const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/automation/run`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!response.ok) {
-      toast.error("Failed to run automation");
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/automation/run`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) {
+        await toastFromFailedResponse(
+          response,
+          "Automation run failed",
+          "We could not start a full analysis run from the admin console."
+        );
+        return;
+      }
+    } catch (err: unknown) {
+      toastFromCaughtError(
+        err,
+        "Automation run failed",
+        "We could not reach the server to start an analysis run."
+      );
       return;
     }
     toast.success("Automation run completed");
@@ -314,13 +339,26 @@ export default function AdminPage() {
 
   const saveSettings = async () => {
     if (!user || !token || !settings) return;
-    const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/automation/settings`, {
-      method: "PATCH",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(settings)
-    });
-    if (!response.ok) {
-      toast.error("Failed to save thresholds");
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/automation/settings`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(settings)
+      });
+      if (!response.ok) {
+        await toastFromFailedResponse(
+          response,
+          "Threshold settings not saved",
+          "We could not persist automation thresholds. Review values and try again."
+        );
+        return;
+      }
+    } catch (err: unknown) {
+      toastFromCaughtError(
+        err,
+        "Threshold settings not saved",
+        "We could not reach the server to update automation thresholds."
+      );
       return;
     }
     toast.success("Threshold settings updated");
@@ -365,7 +403,10 @@ export default function AdminPage() {
   const confirmRoleChange = () => {
     if (!pendingRoleChange || updatingRole) return;
     if (!pendingRolePassword.trim()) {
-      toast.error("Current password is required");
+      toastError(
+        "Password required",
+        "Enter your current account password to confirm this change to owner-level access."
+      );
       return;
     }
     setUpdatingRole(true);
@@ -375,7 +416,13 @@ export default function AdminPage() {
         setPendingRoleChange(null);
         setPendingRolePassword("");
       })
-      .catch((err: Error) => toast.error(err.message || "Role update failed"))
+      .catch((err: unknown) =>
+        toastFromCaughtError(
+          err,
+          "Role not updated",
+          "We could not change this user's role. If a password was required, confirm it is correct."
+        )
+      )
       .finally(() => setUpdatingRole(false));
   };
 
@@ -387,7 +434,13 @@ export default function AdminPage() {
         toast.success(`${pendingMemberDelete.name} removed`);
         setPendingMemberDelete(null);
       })
-      .catch((err: Error) => toast.error(err.message || "Could not remove member"))
+      .catch((err: unknown) =>
+        toastFromCaughtError(
+          err,
+          "Member not removed",
+          "We could not remove this family member. Check your permissions and try again."
+        )
+      )
       .finally(() => setDeletingMember(false));
   };
 
@@ -735,7 +788,10 @@ export default function AdminPage() {
             <Button
               onClick={() => {
                 if (!inviteName.trim() || !inviteEmail.trim()) {
-                  toast.error("Name and email are required");
+                  toastError(
+                    "Missing invite details",
+                    "Enter both the person's full name and email address before sending an invitation."
+                  );
                   return;
                 }
                 inviteFamilyUser(inviteEmail.trim(), inviteName.trim(), inviteRole)
@@ -748,7 +804,13 @@ export default function AdminPage() {
                         : "Existing family user updated."
                     });
                   })
-                  .catch((err: Error) => toast.error(err.message || "Invite failed"));
+                  .catch((err: unknown) =>
+                    toastFromCaughtError(
+                      err,
+                      "Invitation not sent",
+                      "We could not invite this user. Verify the email address and your connection."
+                    )
+                  );
               }}
             >
               <Plus className="h-4 w-4 mr-2" /> Invite user
@@ -773,7 +835,13 @@ export default function AdminPage() {
                       }
                       updateFamilyUserRole(u.id, nextRole)
                         .then(() => toast.success(`Role updated for ${u.name}`))
-                        .catch((err: Error) => toast.error(err.message || "Role update failed"));
+                        .catch((err: unknown) =>
+                          toastFromCaughtError(
+                            err,
+                            "Role not updated",
+                            "We could not change this user's role from the admin console."
+                          )
+                        );
                     })()
                   }
                 >
@@ -850,7 +918,10 @@ export default function AdminPage() {
               onClick={() => {
                 const age = Number(memberAge);
                 if (!memberName.trim() || !memberRelation.trim() || !Number.isFinite(age) || age <= 0) {
-                  toast.error("Provide valid name, age and relationship");
+                  toastError(
+                    "Invalid member details",
+                    "Enter a name, a positive whole number for age, and how this person is related to the family."
+                  );
                   return;
                 }
                 addMember({
@@ -866,7 +937,13 @@ export default function AdminPage() {
                     setMemberNotes("");
                     toast.success("Member added");
                   })
-                  .catch((err: Error) => toast.error(err.message || "Failed to add member"));
+                  .catch((err: unknown) =>
+                    toastFromCaughtError(
+                      err,
+                      "Member not added",
+                      "We could not create this family member record. Check your connection and try again."
+                    )
+                  );
               }}
             >
               <Plus className="h-4 w-4 mr-2" /> Add member

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Printer, Download } from "lucide-react";
 import { useApp } from "@/context/AppContext";
-import { toast } from "sonner";
+import { toastFromCaughtError } from "@/lib/toast-errors";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -37,8 +37,12 @@ export default function DoctorSummaryPage() {
         const json = (await response.json()) as { summary?: DoctorVisitSummary };
         setSummary(json.summary || null);
       })
-      .catch(() => {
-        toast.error("Could not load doctor summary");
+      .catch((err: unknown) => {
+        toastFromCaughtError(
+          err,
+          "Doctor visit summary unavailable",
+          "We could not load the generated summary. Check your connection or try again later."
+        );
         setSummary(null);
       })
       .finally(() => setLoading(false));

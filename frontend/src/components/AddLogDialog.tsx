@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Mic, MicOff, Send, Zap } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
+import { toastError, toastFromCaughtError } from "@/lib/toast-errors";
 
 interface AddLogDialogProps {
   open: boolean;
@@ -75,12 +76,21 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
         toast.success("Log saved!", { description: `Added observation for ${member?.name}` });
         onClose();
       })
-      .catch(() => toast.error("Failed to save log. Check backend connection."));
+      .catch((err: unknown) =>
+        toastFromCaughtError(
+          err,
+          "Observation not saved",
+          "We could not save this note. Check your connection and try again."
+        )
+      );
   };
 
   const startRecording = async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
-      toast.error("Recording is not supported in this browser.");
+      toastError(
+        "Recording not available",
+        "Your browser does not support audio recording from the microphone. Try another browser or add a text note instead."
+      );
       return;
     }
     try {
@@ -108,7 +118,10 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
       mr.start();
       setIsRecording(true);
     } catch {
-      toast.error("Microphone access was denied or unavailable.");
+      toastError(
+        "Microphone access blocked",
+        "Allow microphone access in your browser settings, or use a text observation instead."
+      );
       setIsRecording(false);
     }
   };
@@ -135,7 +148,13 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
         });
         onClose();
       })
-      .catch(() => toast.error("Failed to upload voice log."));
+      .catch((err: unknown) =>
+        toastFromCaughtError(
+          err,
+          "Voice note not uploaded",
+          "We could not upload the recording. Check your connection and file size, then try again."
+        )
+      );
   };
 
   const handleSuggestionClick = (suggestion: string) => {

@@ -5,6 +5,7 @@ import { ArrowLeft, Bot, Bell, PlayCircle, MessageSquareText, CheckCircle2, Circ
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { toastError, toastFromCaughtError, toastFromFailedResponse } from "@/lib/toast-errors";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -66,15 +67,31 @@ export default function AutomationPage() {
   const runNow = async () => {
     if (!user || !token) return;
     if (!canManageAutomation) {
-      toast.error("Only owners and caregivers can run automation");
+      toastError(
+        "Action not allowed",
+        "Only family owners and caregivers can run care automation. Ask an owner to update your role if needed."
+      );
       return;
     }
-    const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/automation/run`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!response.ok) {
-      toast.error("Could not run automation");
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/automation/run`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) {
+        await toastFromFailedResponse(
+          response,
+          "Automation run failed",
+          "We could not start an analysis run. Try again in a moment."
+        );
+        return;
+      }
+    } catch (err: unknown) {
+      toastFromCaughtError(
+        err,
+        "Automation run failed",
+        "We could not reach the server to start an analysis run."
+      );
       return;
     }
     toast.success("Automation run completed");
@@ -84,16 +101,32 @@ export default function AutomationPage() {
   const saveSettings = async () => {
     if (!user || !token || !settings) return;
     if (!canManageAutomation) {
-      toast.error("Only owners and caregivers can update settings");
+      toastError(
+        "Settings locked",
+        "Only owners and caregivers can change automation settings. Contact a family owner if you need access."
+      );
       return;
     }
-    const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/automation/settings`, {
-      method: "PATCH",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(settings)
-    });
-    if (!response.ok) {
-      toast.error("Could not update settings");
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/families/${user.familyId}/automation/settings`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(settings)
+      });
+      if (!response.ok) {
+        await toastFromFailedResponse(
+          response,
+          "Settings not saved",
+          "We could not save automation preferences. Confirm your values and try again."
+        );
+        return;
+      }
+    } catch (err: unknown) {
+      toastFromCaughtError(
+        err,
+        "Settings not saved",
+        "We could not reach the server to update automation preferences."
+      );
       return;
     }
     toast.success("Automation settings saved");

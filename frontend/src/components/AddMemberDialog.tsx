@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Heart, UserPlus } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { toastFromCaughtError } from "@/lib/toast-errors";
 
 interface AddMemberDialogProps {
   open: boolean;
@@ -31,7 +32,13 @@ export default function AddMemberDialog({ open, onClose }: AddMemberDialogProps)
         setNotes("");
         onClose();
       })
-      .catch(() => toast.error("Failed to add member. Check backend connection."));
+      .catch((err: unknown) =>
+        toastFromCaughtError(
+          err,
+          "Family member not added",
+          "We could not create this profile. Check your connection and try again."
+        )
+      );
   };
 
   return (

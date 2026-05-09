@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { format, isToday, isYesterday } from "date-fns";
 import { toast } from "sonner";
+import { toastFromCaughtError } from "@/lib/toast-errors";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -228,7 +229,13 @@ export default function MemberDetail() {
         setMemberPendingDelete(false);
         navigate("/");
       })
-      .catch(() => toast.error("Could not remove member"))
+      .catch((err: unknown) =>
+        toastFromCaughtError(
+          err,
+          "Member not removed",
+          "We could not remove this family member from your account. Check your connection and try again."
+        )
+      )
       .finally(() => setDeletingMember(false));
   };
 
@@ -282,7 +289,13 @@ export default function MemberDetail() {
         toast.success("Log deleted");
         setLogPendingDelete(null);
       })
-      .catch((error: Error) => toast.error(error.message || "Could not delete log"))
+      .catch((err: unknown) =>
+        toastFromCaughtError(
+          err,
+          "Observation not deleted",
+          "We could not delete this health log. Refresh the page and try again."
+        )
+      )
       .finally(() => setDeletingLog(false));
   };
 
