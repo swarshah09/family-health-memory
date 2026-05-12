@@ -12,6 +12,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000
 type NotificationItem = {
   id: string;
   memberId: string;
+  insightId?: string;
   message: string;
   severity: "info" | "warning" | "alert";
   isRead: boolean;

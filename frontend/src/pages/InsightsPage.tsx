@@ -1,7 +1,21 @@
 import { useApp } from "@/context/AppContext";
 import type { Insight } from "@/context/AppContext";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Sparkles, AlertTriangle, Info, TrendingUp, Shield, Loader2, ListChecks, CheckCircle2, Circle } from "lucide-react";
+import {
+  ArrowLeft,
+  Sparkles,
+  AlertTriangle,
+  Info,
+  TrendingUp,
+  Shield,
+  Loader2,
+  ListChecks,
+  CheckCircle2,
+  Circle,
+  Stethoscope
+} from "lucide-react";
+import type { CareGuidanceItem } from "@/types/care-guidance";
+import { formatEvidenceLogLabel } from "@/lib/evidence-log-label";
 import { motion } from "framer-motion";
 
 const stagger = {
@@ -38,10 +52,17 @@ function priorityPillClasses(priority?: Insight["priority"]): string {
   return "bg-muted/80 text-muted-foreground border-border/60";
 }
 
+function careUrgencyClasses(urgency: CareGuidanceItem["urgency"]): string {
+  if (urgency === "high") return "bg-amber-500/10 text-amber-900 dark:text-amber-100 border-amber-500/25";
+  if (urgency === "moderate") return "bg-primary/8 text-primary border-primary/20";
+  return "bg-muted/70 text-muted-foreground border-border/60";
+}
+
 export default function InsightsPage() {
-  const { members, getAllInsights, insightsLoading } = useApp();
+  const { members, logs, getAllInsights, getAllCareGuidance, careGuidanceDisclaimer, insightsLoading } = useApp();
   const navigate = useNavigate();
   const insights = getAllInsights();
+  const careGuidanceItems = getAllCareGuidance();
 
   const grouped: Record<string, typeof insights> = {};
   insights.forEach((ins) => {
@@ -61,6 +82,13 @@ export default function InsightsPage() {
   const openEvidenceLog = (memberId: string, logId: string) => {
     navigate(`/member/${memberId}?logId=${encodeURIComponent(logId)}`);
   };
+
+  const careByMemberId = new Map<string, CareGuidanceItem[]>();
+  for (const row of careGuidanceItems) {
+    const arr = careByMemberId.get(row.memberId) || [];
+    arr.push(row);
+    careByMemberId.set(row.memberId, arr);
+  }
 
   return (
     <div className="app-shell app-safe-bottom">
@@ -203,6 +231,98 @@ export default function InsightsPage() {
           </div>
         </motion.details>
 
+        <motion.section className="space-y-3" variants={fadeUp}>
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/15">
+              <Stethoscope className="h-4 w-4 text-primary" aria-hidden />
+            </div>
+            <div>
+              <h2 className="text-sm font-display font-semibold text-foreground">Suggested care guidance</h2>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                Calm, observational routing ideas from recurring wording—patterns only, not causes or treatments
+              </p>
+            </div>
+          </div>
+
+          {careGuidanceItems.length === 0 ? (
+            <div className="rounded-2xl border border-border/50 bg-muted/20 px-4 py-3">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                When the same symptom phrases appear in at least two notes within about a month, gentle specialist suggestions
+                may show here. Keep logging in everyday language; nothing here replaces a clinician&apos;s judgment.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {[...careByMemberId.entries()].map(([memberId, rows]) => {
+                const memberLabel =
+                  rows[0]?.memberName?.trim() ||
+                  members.find((m) => m.id === memberId)?.name ||
+                  "Family member";
+                return (
+                <div key={memberId} className="space-y-2">
+                  <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">{memberLabel}</p>
+                  <div className="space-y-2.5">
+                    {rows.map((row, i) => (
+                      <motion.div
+                        key={row.id}
+                        className="rounded-2xl border border-border/50 bg-card/40 p-4 shadow-sm"
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.04 }}
+                      >
+                        <div className="flex flex-wrap items-start gap-2 gap-y-1.5">
+                          <p className="text-sm font-semibold text-foreground leading-snug">{row.symptomLabel}</p>
+                          <span
+                            className={`inline-flex items-center rounded-lg border px-2 py-0.5 text-[10px] font-medium capitalize ${careUrgencyClasses(
+                              row.urgency
+                            )}`}
+                          >
+                            Urgency: {row.urgency}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-1">{row.category}</p>
+                        <p className="text-[11px] text-foreground/85 mt-2 leading-relaxed">
+                          <span className="font-medium text-foreground/90">Consider discussing with:</span>{" "}
+                          {row.suggestedSpecialist}
+                        </p>
+                        <p className="text-xs text-foreground/90 mt-2 leading-relaxed">{row.explanation}</p>
+                        {row.evidenceLogIds.length > 0 ? (
+                          <div className="mt-2 space-y-1">
+                            <p className="text-[10px] text-muted-foreground/90">Related notes</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {row.evidenceLogIds.slice(0, 4).map((logId) => (
+                                <button
+                                  key={`${row.id}-${logId}`}
+                                  type="button"
+                                  title={formatEvidenceLogLabel(logId, logs, { memberId: row.memberId, maxLen: 120 })}
+                                  onClick={() => openEvidenceLog(row.memberId, logId)}
+                                  className="inline-flex items-center max-w-[min(100%,14rem)] rounded-md border border-border/70 bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors text-left truncate"
+                                >
+                                  {formatEvidenceLogLabel(logId, logs, { memberId: row.memberId, maxLen: 48 })}
+                                </button>
+                              ))}
+                              {row.evidenceLogIds.length > 4 ? (
+                                <span className="text-[10px] text-muted-foreground/90 py-0.5">
+                                  +{row.evidenceLogIds.length - 4} more
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="rounded-xl border border-border/40 bg-muted/25 px-3 py-2.5">
+            <p className="text-[10px] text-muted-foreground leading-relaxed">{careGuidanceDisclaimer}</p>
+          </div>
+        </motion.section>
+
         {showThinking && (
           <motion.div
             className="glass-card rounded-2xl p-8 flex flex-col items-center gap-3 text-center"
@@ -318,11 +438,19 @@ export default function InsightsPage() {
                                 <button
                                   key={`${ins.id}-${logId}`}
                                   type="button"
-                                  title={snippetsByLogId.get(logId) || "Open source log"}
+                                  title={formatEvidenceLogLabel(logId, logs, {
+                                    memberId: ins.memberId,
+                                    snippet: snippetsByLogId.get(logId),
+                                    maxLen: 140
+                                  })}
                                   onClick={() => openEvidenceLog(ins.memberId, logId)}
-                                  className="inline-flex items-center rounded-md border border-border/70 bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
+                                  className="inline-flex items-center max-w-[min(100%,14rem)] rounded-md border border-border/70 bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors text-left truncate"
                                 >
-                                  {logId}
+                                  {formatEvidenceLogLabel(logId, logs, {
+                                    memberId: ins.memberId,
+                                    snippet: snippetsByLogId.get(logId),
+                                    maxLen: 48
+                                  })}
                                 </button>
                               ))}
                               {evidenceIds.length > 3 ? (
@@ -333,15 +461,6 @@ export default function InsightsPage() {
                             </div>
                           </div>
                         )}
-                        {ins.evidenceSnippets && ins.evidenceSnippets.length > 0 ? (
-                          <div className="space-y-0.5 pt-0.5">
-                            {ins.evidenceSnippets.slice(0, 2).map((item) => (
-                              <p key={`${ins.id}-snippet-${item.logId}`} className="text-[10px] text-muted-foreground/80">
-                                <span className="font-medium text-foreground/70">{item.logId}:</span> {item.snippet}
-                              </p>
-                            ))}
-                          </div>
-                        ) : null}
                         {hint ? <p className="text-[10px] text-muted-foreground/80 italic">{hint}</p> : null}
                       </div>
                       <div className="flex flex-col items-end gap-1 shrink-0 text-right">

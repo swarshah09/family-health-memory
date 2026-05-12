@@ -4,6 +4,7 @@ services:
     runtime: node
     rootDir: backend
     buildCommand: npm install && npm run build
+    # start runs TypeScript via tsx (same as local); use start:dist + omit build if you serve precompiled JS only
     startCommand: npm run start
     healthCheckPath: /health
     envVars:

@@ -34,6 +34,7 @@ export async function listAuditLogs(
 ): Promise<{
   rows: Array<{
     id: string;
+    actorUserId: string;
     actorEmail: string;
     action: string;
     targetType: string;
@@ -62,6 +63,7 @@ export async function listAuditLogs(
     total,
     rows: rows.map((row) => ({
     id: row._id.toString(),
+    actorUserId: row.actorUserId,
     actorEmail: row.actorEmail,
     action: row.action,
     targetType: row.targetType,

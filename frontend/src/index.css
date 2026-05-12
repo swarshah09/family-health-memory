@@ -402,3 +402,33 @@
     scrollbar-width: none;
   }
 }
+
+@page {
+  margin: 14mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 11pt;
+  }
+
+  .doctor-summary-print-root {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .doctor-summary-print-root .app-shell {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    max-width: none !important;
+  }
+
+  .dock-shell,
+  .print\:hidden {
+    display: none !important;
+  }
+}

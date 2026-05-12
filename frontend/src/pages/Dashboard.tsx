@@ -1,8 +1,8 @@
 import { useApp } from "@/context/AppContext";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Plus, ChevronRight, LogOut, Sparkles, TrendingUp, Clock, Heart, Users, FileText } from "lucide-react";
-import { useState } from "react";
+import { Plus, ChevronRight, LogOut, Sparkles, TrendingUp, Clock, Heart, Users, FileText, UserPlus, Home } from "lucide-react";
+import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import AddMemberDialog from "@/components/AddMemberDialog";
 import InsightBadge from "@/components/InsightBadge";
@@ -19,15 +19,29 @@ const fadeUp = {
 };
 
 export default function Dashboard() {
-  const { user, members, logout, getAllInsights, getLogsForMember } = useApp();
+  const { user, members, logs, logout, getAllInsights, getLogsForMember, pendingJoinInboxCount } = useApp();
   const navigate = useNavigate();
   const [showAddMember, setShowAddMember] = useState(false);
   const insights = getAllInsights();
   const alertCount = insights.filter((i) => i.severity === "alert").length;
   const warningCount = insights.filter((i) => i.severity === "warning").length;
-  const totalLogs = members.reduce((sum, m) => sum + getLogsForMember(m.id).length, 0);
+
+  const trackedMembers = useMemo(
+    () => members.filter((m) => !m.linkedUserId || m.linkedUserId !== user?.id),
+    [members, user?.id]
+  );
+  const myHealthMember = useMemo(
+    () => members.find((m) => m.linkedUserId === user?.id),
+    [members, user?.id]
+  );
+
+  const trackedLogCount = useMemo(
+    () => trackedMembers.reduce((sum, m) => sum + logs.filter((l) => l.memberId === m.id).length, 0),
+    [trackedMembers, logs]
+  );
+
   const topInsight = insights[0];
-  const inactiveMembers = members.filter((member) => {
+  const inactiveMembers = trackedMembers.filter((member) => {
     const logsForMember = getLogsForMember(member.id);
     if (!logsForMember.length) return true;
     const last = new Date(logsForMember[0].timestamp).getTime();
@@ -68,37 +82,66 @@ export default function Dashboard() {
             </motion.button>
           </div>
 
-          {/* Alert banner */}
-          <AnimatePresence>
-            {alertCount > 0 && (
-              <motion.button
-                onClick={() => navigate("/insights")}
-                className="w-full bg-primary-foreground/15 backdrop-blur-md rounded-2xl p-4 flex items-center gap-3 border border-primary-foreground/20 relative z-10"
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                <motion.div
-                  className="h-10 w-10 rounded-xl bg-primary-foreground/20 flex items-center justify-center"
-                  animate={{ rotate: [0, 10, -10, 0] }}
-                  transition={{ duration: 3, repeat: Infinity, repeatDelay: 2 }}
+          <div className="flex flex-col gap-3 relative z-10">
+            {/* Alert banner */}
+            <AnimatePresence>
+              {alertCount > 0 && (
+                <motion.button
+                  onClick={() => navigate("/insights")}
+                  className="w-full bg-primary-foreground/15 backdrop-blur-md rounded-2xl p-4 flex items-center gap-3 border border-primary-foreground/20"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                 >
-                  <Sparkles className="h-5 w-5 text-primary-foreground" />
-                </motion.div>
-                <div className="flex-1 text-left">
-                  <p className="text-primary-foreground text-sm font-semibold">
-                    {alertCount} priority insight{alertCount > 1 ? "s" : ""} detected
-                  </p>
-                  <p className="text-primary-foreground/60 text-xs">Review observations and evidence</p>
-                </div>
-                <div className="h-8 w-8 rounded-full bg-primary-foreground/20 flex items-center justify-center">
-                  <span className="text-xs font-bold text-primary-foreground">{alertCount}</span>
-                </div>
-              </motion.button>
-            )}
-          </AnimatePresence>
+                  <motion.div
+                    className="h-10 w-10 rounded-xl bg-primary-foreground/20 flex items-center justify-center"
+                    animate={{ rotate: [0, 10, -10, 0] }}
+                    transition={{ duration: 3, repeat: Infinity, repeatDelay: 2 }}
+                  >
+                    <Sparkles className="h-5 w-5 text-primary-foreground" />
+                  </motion.div>
+                  <div className="flex-1 text-left">
+                    <p className="text-primary-foreground text-sm font-semibold">
+                      {alertCount} priority insight{alertCount > 1 ? "s" : ""} detected
+                    </p>
+                    <p className="text-primary-foreground/60 text-xs">Review observations and evidence</p>
+                  </div>
+                  <div className="h-8 w-8 rounded-full bg-primary-foreground/20 flex items-center justify-center">
+                    <span className="text-xs font-bold text-primary-foreground">{alertCount}</span>
+                  </div>
+                </motion.button>
+              )}
+            </AnimatePresence>
+            <AnimatePresence>
+              {pendingJoinInboxCount > 0 && (
+                <motion.button
+                  type="button"
+                  onClick={() => navigate("/workspace")}
+                  className="w-full bg-amber-400/20 backdrop-blur-md rounded-2xl p-4 flex items-center gap-3 border border-amber-300/35"
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  <div className="h-10 w-10 rounded-xl bg-amber-400/25 flex items-center justify-center shrink-0">
+                    <UserPlus className="h-5 w-5 text-amber-100" />
+                  </div>
+                  <div className="flex-1 text-left min-w-0">
+                    <p className="text-primary-foreground text-sm font-semibold">
+                      {pendingJoinInboxCount} join request{pendingJoinInboxCount > 1 ? "s" : ""} waiting
+                    </p>
+                    <p className="text-primary-foreground/65 text-xs">Open Family to approve or decline</p>
+                  </div>
+                  <div className="h-8 w-8 rounded-full bg-amber-400/30 flex items-center justify-center shrink-0">
+                    <span className="text-xs font-bold text-primary-foreground">{pendingJoinInboxCount}</span>
+                  </div>
+                </motion.button>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
 
         {/* Stats cards overlapping header */}
@@ -110,8 +153,8 @@ export default function Dashboard() {
         >
           <div className="grid grid-cols-3 gap-3">
             {[
-              { label: "Members", value: members.length, icon: Users, color: "primary" },
-              { label: "Logs", value: totalLogs, icon: FileText, color: "accent" },
+              { label: "Tracked", value: trackedMembers.length, icon: Users, color: "primary" },
+              { label: "Logs", value: trackedLogCount, icon: FileText, color: "accent" },
               { label: "Patterns", value: alertCount + warningCount, icon: TrendingUp, color: "insight" },
             ].map(({ label, value, icon: Icon, color }) => (
             <motion.div
@@ -124,7 +167,7 @@ export default function Dashboard() {
                   className="h-9 w-9 rounded-xl mx-auto mb-2 flex items-center justify-center"
                   style={{
                     background:
-                      label === "Members"
+                      label === "Tracked"
                         ? "hsl(var(--accent) / 0.16)"
                         : label === "Logs"
                         ? "hsl(var(--success) / 0.16)"
@@ -135,7 +178,7 @@ export default function Dashboard() {
                     className="h-4 w-4"
                     style={{
                       color:
-                        label === "Members"
+                        label === "Tracked"
                           ? "hsl(var(--accent))"
                           : label === "Logs"
                           ? "hsl(var(--success))"
@@ -153,6 +196,49 @@ export default function Dashboard() {
 
       {/* Family members */}
       <div className="px-5 mt-6">
+        <div className="grid grid-cols-1 gap-3 mb-5">
+          {myHealthMember && (
+            <motion.button
+              type="button"
+              onClick={() => navigate(`/member/${myHealthMember.id}`)}
+              className="w-full glass-card-hover rounded-2xl p-4 flex items-center gap-4 text-left border border-primary/15"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+                <Heart className="h-5 w-5 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">My Health</p>
+                <p className="text-sm font-semibold text-foreground mt-0.5">{myHealthMember.name}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Private to you; family heads can view when supporting your care.
+                </p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
+            </motion.button>
+          )}
+          <motion.button
+            type="button"
+            onClick={() => navigate("/workspace")}
+            className="w-full glass-card rounded-2xl p-4 flex items-center gap-4 text-left border border-border/50 hover:border-primary/25 transition-colors"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <div className="h-12 w-12 rounded-2xl bg-muted flex items-center justify-center shrink-0">
+              <Home className="h-5 w-5 text-muted-foreground" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Family Workspace</p>
+              <p className="text-sm font-semibold text-foreground mt-0.5">Team, roles & activity</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Join requests, permissions, and shared workspace tools.</p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
+          </motion.button>
+        </div>
         {topInsight && (
           <motion.button
             onClick={() => navigate("/insights")}
@@ -174,7 +260,10 @@ export default function Dashboard() {
           </div>
         )}
         <div className="flex items-center justify-between mb-4">
-          <h2 className="section-title">People You Track</h2>
+          <div>
+            <h2 className="section-title">People You Track</h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">You never appear in this list — only people you monitor.</p>
+          </div>
           <motion.div whileTap={{ scale: 0.95 }}>
             <Button
               size="sm"
@@ -188,7 +277,7 @@ export default function Dashboard() {
         </div>
 
         <motion.div className="space-y-3" variants={stagger} initial="hidden" animate="show">
-          {members.map((member) => {
+          {trackedMembers.map((member) => {
             const memberLogs = getLogsForMember(member.id);
             const memberInsights = insights.filter((i) => i.memberId === member.id);
             const lastLog = memberLogs[0];
@@ -245,7 +334,7 @@ export default function Dashboard() {
           })}
         </motion.div>
 
-        {members.length === 0 && (
+        {trackedMembers.length === 0 && (
           <motion.div
             className="text-center py-20 glass-card rounded-2xl"
             initial={{ opacity: 0 }}
@@ -255,8 +344,10 @@ export default function Dashboard() {
             <div className="h-16 w-16 rounded-3xl health-gradient-soft mx-auto mb-4 flex items-center justify-center">
               <Heart className="h-7 w-7 text-primary" />
             </div>
-            <p className="text-foreground font-display font-semibold">No family members yet</p>
-            <p className="text-muted-foreground text-sm mt-1">Start by adding someone you care about</p>
+            <p className="text-foreground font-display font-semibold">No tracked people yet</p>
+            <p className="text-muted-foreground text-sm mt-1 px-4">
+              Add parents, children, or anyone you help care for. Your own entries stay under My Health above.
+            </p>
             <Button className="mt-5 health-gradient border-0 rounded-xl shadow-glow gap-2" onClick={() => setShowAddMember(true)}>
               <Plus className="h-4 w-4" /> Add First Member
             </Button>

@@ -5,22 +5,118 @@ const userSchema = new Schema(
     email: { type: String, required: true, unique: true, lowercase: true, index: true },
     name: { type: String, required: true },
     passwordHash: { type: String, required: true },
-    familyId: { type: String, required: true, index: true },
-    role: { type: String, enum: ["owner", "caregiver", "viewer"], required: true, default: "viewer" }
+    /** Set when the user belongs to a family; cleared when they leave. */
+    familyId: { type: String, required: false, index: true, sparse: true },
+    /** @deprecated Prefer familyRole */
+    role: { type: String, enum: ["owner", "caregiver", "viewer"], required: false, default: "viewer" },
+    workspaceRole: { type: String, enum: ["head", "member"], required: false, index: true },
+    familyRole: { type: String, enum: ["HEAD", "MEMBER"], required: false, index: true },
+    profilePictureUrl: { type: String, required: false },
+    description: { type: String, required: false, maxlength: 2000 }
   },
   { timestamps: true }
 );
 
-const familyMemberSchema = new Schema(
+const familyWorkspaceSchema = new Schema(
   {
-    familyId: { type: String, required: true, index: true },
+    familyId: { type: String, required: true, unique: true, index: true },
     name: { type: String, required: true },
-    age: { type: Number, required: true },
-    relationship: { type: String, required: true },
-    notes: { type: String }
+    createdByUserId: { type: String, required: true, index: true }
   },
   { timestamps: true }
 );
+
+const joinFamilyRequestSchema = new Schema(
+  {
+    targetFamilyId: { type: String, required: true, index: true },
+    email: { type: String, required: true, lowercase: true, index: true },
+    name: { type: String, required: true },
+    passwordHash: { type: String, required: true },
+    status: { type: String, enum: ["pending", "approved", "rejected"], required: true, default: "pending", index: true },
+    resolvedByUserId: { type: String },
+    resolvedAt: { type: Date },
+    message: { type: String }
+  },
+  { timestamps: true }
+);
+joinFamilyRequestSchema.index({ targetFamilyId: 1, email: 1, status: 1 });
+
+const logAccessGrantSchema = new Schema(
+  {
+    familyId: { type: String, required: true, index: true },
+    granteeUserId: { type: String, required: true, index: true },
+    memberProfileId: { type: String, required: true, index: true },
+    permission: {
+      type: String,
+      enum: ["VIEW_ONLY", "CONTRIBUTOR", "FULL_ACCESS"],
+      required: true
+    },
+    grantedByUserId: { type: String, required: true },
+    active: { type: Boolean, required: true, default: true, index: true }
+  },
+  { timestamps: true }
+);
+logAccessGrantSchema.index({ familyId: 1, granteeUserId: 1, memberProfileId: 1, active: 1 });
+
+const memberLogAccessRequestSchema = new Schema(
+  {
+    familyId: { type: String, required: true, index: true },
+    requesterUserId: { type: String, required: true, index: true },
+    targetMemberId: { type: String, required: true, index: true },
+    requestedPermission: {
+      type: String,
+      enum: ["VIEW_ONLY", "CONTRIBUTOR", "FULL_ACCESS"],
+      required: true
+    },
+    status: { type: String, enum: ["pending", "approved", "rejected"], required: true, default: "pending", index: true },
+    resolvedByUserId: { type: String },
+    resolvedAt: { type: Date }
+  },
+  { timestamps: true }
+);
+memberLogAccessRequestSchema.index({ familyId: 1, targetMemberId: 1, requesterUserId: 1, status: 1 });
+
+
+const familyMemberSchema = new Schema(
+  {
+    familyId: { type: String, required: true, index: true },
+    /** When set, this profile is that user's personal "My Health" space (one per user per family). */
+    linkedUserId: { type: String, required: false, index: true, sparse: true },
+    name: { type: String, required: true },
+    age: { type: Number, required: true },
+    relationship: { type: String, required: true },
+    notes: { type: String },
+    careCollaborators: {
+      type: [
+        new Schema(
+          {
+            userId: { type: String, required: true },
+            note: { type: String },
+            since: { type: Date }
+          },
+          { _id: false }
+        )
+      ],
+      default: undefined
+    }
+  },
+  { timestamps: true }
+);
+familyMemberSchema.index({ familyId: 1, linkedUserId: 1 }, { unique: true, sparse: true });
+
+const familyInvitationSchema = new Schema(
+  {
+    familyId: { type: String, required: true, index: true },
+    email: { type: String, required: true, lowercase: true, index: true },
+    inviteeName: { type: String, required: true },
+    role: { type: String, enum: ["caregiver", "viewer"], required: true },
+    tokenHash: { type: String, required: true, unique: true, index: true },
+    invitedByUserId: { type: String, required: true, index: true },
+    expiresAt: { type: Date, required: true, index: true }
+  },
+  { timestamps: true }
+);
+familyInvitationSchema.index({ familyId: 1, email: 1 });
 
 const healthLogSchema = new Schema(
   {
@@ -28,7 +124,17 @@ const healthLogSchema = new Schema(
     memberId: { type: String, required: true, index: true },
     createdBy: { type: String, required: true },
     contributorId: { type: String, required: true, index: true },
-    contributorRole: { type: String, enum: ["owner", "caregiver", "viewer"], required: true, index: true },
+    contributorRole: {
+      type: String,
+      enum: ["owner", "caregiver", "viewer", "HEAD", "MEMBER"],
+      required: true,
+      index: true
+    },
+    ownerUserId: { type: String, index: true },
+    createdByUserId: { type: String, index: true },
+    /** self = subject recorded their own entry; caregiver = someone else recorded it (observation). */
+    sourceType: { type: String, enum: ["self", "caregiver"], required: false, index: true },
+    visibility: { type: String, enum: ["private", "family"], index: true },
     text: { type: String, required: true },
     type: { type: String, enum: ["text", "voice"], required: true },
     tags: { type: [String], default: [] },
@@ -40,6 +146,7 @@ const healthLogSchema = new Schema(
       default: "pending",
       index: true
     },
+    rawAudioMetadata: { type: Schema.Types.Mixed, default: undefined },
     audioBase64: { type: String },
     occurredAt: { type: Date, required: true, index: true }
   },
@@ -265,6 +372,7 @@ const weeklyDigestSchema = new Schema(
   { timestamps: true, collection: "weekly_digests" }
 );
 weeklyDigestSchema.index({ familyId: 1, userId: 1, personId: 1, generatedAt: -1 });
+weeklyDigestSchema.index({ familyId: 1, personId: 1, generatedAt: -1 });
 weeklyDigestSchema.index({ userId: 1, personId: 1, weekStart: 1 }, { unique: true });
 weeklyDigestSchema.index({ userId: 1, personId: 1, generatedAt: -1 });
 
@@ -284,6 +392,11 @@ aiProcessingLogSchema.index({ familyId: 1, stage: 1, timestamp: -1 });
 precomputedInsightSchema.index({ familyId: 1, userId: 1, personId: 1, generatedAt: -1 });
 
 export const UserModel = mongoose.model("User", userSchema);
+export const FamilyWorkspaceModel = mongoose.model("FamilyWorkspace", familyWorkspaceSchema);
+export const JoinFamilyRequestModel = mongoose.model("JoinFamilyRequest", joinFamilyRequestSchema);
+export const LogAccessGrantModel = mongoose.model("LogAccessGrant", logAccessGrantSchema);
+export const MemberLogAccessRequestModel = mongoose.model("MemberLogAccessRequest", memberLogAccessRequestSchema);
+export const FamilyInvitationModel = mongoose.model("FamilyInvitation", familyInvitationSchema);
 export const FamilyMemberModel = mongoose.model("FamilyMember", familyMemberSchema);
 export const HealthLogModel = mongoose.model("HealthLog", healthLogSchema);
 export const InsightSnapshotModel = mongoose.model("InsightSnapshot", insightSnapshotSchema);

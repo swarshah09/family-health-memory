@@ -67,7 +67,7 @@ export function createWeeklyDigest(input: {
   insights: Insight[];
   timelineEvents: TimelineNarrativeEvent[];
   now?: Date;
-}): Omit<WeeklyDigest, "id" | "generatedAt"> & {
+}): Omit<WeeklyDigest, "id" | "generatedAt" | "weekStart" | "weekEnd" | "sourceLogIds"> & {
   generatedAt: Date;
   weekStart: Date;
   weekEnd: Date;

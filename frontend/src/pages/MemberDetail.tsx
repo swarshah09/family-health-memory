@@ -1,11 +1,13 @@
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import type { HealthLog } from "@/context/AppContext";
-import { ArrowLeft, Plus, Mic, Sparkles, Trash2, FileText, Search, Download, Pencil } from "lucide-react";
+import { ArrowLeft, Plus, Mic, Sparkles, Trash2, FileText, Search, Download, Pencil, Users, Stethoscope } from "lucide-react";
 import { useEffect, useState } from "react";
+import { displayRoleLabel, canModifyLogInUi, isHeadUser, canCreateHealthLogs, inferLogSourceTypeUi } from "@/lib/collaboration-roles";
 import { motion, AnimatePresence } from "framer-motion";
 import AddLogDialog from "@/components/AddLogDialog";
 import EditLogDialog from "@/components/EditLogDialog";
+import VoiceLogAudio from "@/components/VoiceLogAudio";
 import EditMemberDialog from "@/components/EditMemberDialog";
 import InsightBadge from "@/components/InsightBadge";
 import {
@@ -21,6 +23,9 @@ import {
 import { format, isToday, isYesterday } from "date-fns";
 import { toast } from "sonner";
 import { toastFromCaughtError } from "@/lib/toast-errors";
+import type { DoctorSummaryDocument } from "@/types/doctor-summary";
+import type { CareGuidanceItem } from "@/types/care-guidance";
+import { formatEvidenceLogLabel } from "@/lib/evidence-log-label";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -59,17 +64,6 @@ type TimelineNarrativeEvent = {
   sourceLogIds: string[];
 };
 
-type DoctorVisitSummary = {
-  title: string;
-  periodLabel: string;
-  generatedAt: string;
-  recurringSymptoms: Array<{ symptom: string; count: number }>;
-  trendAnalysis: Array<{ symptom: string; count: number; previousCount: number; trend: "increasing" | "decreasing" | "stable" }>;
-  majorChangesTimeline: Array<{ date: string; event: string; details: string }>;
-  medicationObservations: string[];
-  summary: string;
-};
-
 function formatDateGroup(date: Date): string {
   if (isToday(date)) return "Today";
   if (isYesterday(date)) return "Yesterday";
@@ -86,6 +80,12 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.22, 1, 0.36, 1] } },
 };
 
+function careUrgencyClasses(urgency: CareGuidanceItem["urgency"]): string {
+  if (urgency === "high") return "bg-amber-500/10 text-amber-900 dark:text-amber-100 border-amber-500/25";
+  if (urgency === "moderate") return "bg-primary/8 text-primary border-primary/20";
+  return "bg-muted/70 text-muted-foreground border-border/60";
+}
+
 export default function MemberDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -93,8 +93,13 @@ export default function MemberDetail() {
   const {
     user,
     members,
+    familyUsers,
+    loadFamilyUsers,
+    updateMember,
     getLogsForMember,
     getInsightsForMember,
+    getCareGuidanceForMember,
+    careGuidanceDisclaimer,
     removeMember,
     removeLog,
     hasPendingVoiceLogs,
@@ -115,8 +120,14 @@ export default function MemberDetail() {
   const [timelineEvents, setTimelineEvents] = useState<TimelineNarrativeEvent[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [focusedLogId, setFocusedLogId] = useState<string | null>(null);
-  const [doctorSummary, setDoctorSummary] = useState<DoctorVisitSummary | null>(null);
+  const [doctorSummary, setDoctorSummary] = useState<DoctorSummaryDocument | null>(null);
   const [doctorSummaryLoading, setDoctorSummaryLoading] = useState(false);
+  const [careSelection, setCareSelection] = useState<string[]>([]);
+  const [savingCareTeam, setSavingCareTeam] = useState(false);
+
+  useEffect(() => {
+    if (user?.familyId) loadFamilyUsers().catch(() => {});
+  }, [user?.familyId]);
 
   const member = members.find((m) => m.id === id);
   if (!member)
@@ -128,9 +139,21 @@ export default function MemberDetail() {
 
   const logs = getLogsForMember(member.id);
   const insights = getInsightsForMember(member.id);
+  const memberCareGuidance = getCareGuidanceForMember(member.id);
   const pendingVoice = hasPendingVoiceLogs(member.id);
   const token = localStorage.getItem("fhm_access_token");
   const selectedLogIdFromUrl = searchParams.get("logId");
+  const canManage = isHeadUser(user);
+  const canAddLog = canCreateHealthLogs(user);
+
+  const contributorLabel = (contributorId: string) =>
+    familyUsers.find((u) => u.id === contributorId)?.name || "Teammate";
+
+  const timelineContributorIds = [...new Set(logs.map((l) => l.contributorId))];
+
+  useEffect(() => {
+    setCareSelection((member.careCollaborators || []).map((c) => c.userId));
+  }, [member.id, member.careCollaborators?.map((c) => c.userId).join(",")]);
 
   useEffect(() => {
     if (!pendingVoice) return;
@@ -194,8 +217,8 @@ export default function MemberDetail() {
     })
       .then(async (response) => {
         if (!response.ok) throw new Error("Failed to load doctor summary");
-        const json = (await response.json()) as { summary?: DoctorVisitSummary };
-        setDoctorSummary(json.summary || null);
+        const json = (await response.json()) as { doctorSummary?: DoctorSummaryDocument };
+        setDoctorSummary(json.doctorSummary || null);
       })
       .catch(() => setDoctorSummary(null))
       .finally(() => setDoctorSummaryLoading(false));
@@ -218,6 +241,27 @@ export default function MemberDetail() {
 
   const handleRemove = () => {
     setMemberPendingDelete(true);
+  };
+
+  const saveCareCollaborators = () => {
+    if (!canManage || savingCareTeam) return;
+    setSavingCareTeam(true);
+    const prevNotes = new Map((member.careCollaborators || []).map((c) => [c.userId, c.note]));
+    updateMember(member.id, {
+      name: member.name,
+      age: member.age,
+      relationship: member.relationship,
+      notes: member.notes,
+      careCollaborators: careSelection.map((userId) => ({
+        userId,
+        note: prevNotes.get(userId)
+      }))
+    })
+      .then(() => toast.success("Care collaborators updated"))
+      .catch((err: unknown) =>
+        toastFromCaughtError(err, "Not saved", "We could not update the care team for this profile.")
+      )
+      .finally(() => setSavingCareTeam(false));
   };
 
   const confirmRemoveMember = () => {
@@ -328,13 +372,15 @@ export default function MemberDetail() {
             <h1 className="font-display font-bold text-foreground text-lg">{member.name}</h1>
             <p className="text-xs text-muted-foreground">{member.age} years · {member.relationship}</p>
           </div>
-          <motion.button
-            onClick={() => setShowEditMember(true)}
-            className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
-            whileTap={{ scale: 0.9 }}
-          >
-            <Pencil className="h-4 w-4" />
-          </motion.button>
+          {canManage ? (
+            <motion.button
+              onClick={() => setShowEditMember(true)}
+              className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
+              whileTap={{ scale: 0.9 }}
+            >
+              <Pencil className="h-4 w-4" />
+            </motion.button>
+          ) : null}
           <motion.button
             onClick={handleExportReport}
             className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
@@ -351,13 +397,15 @@ export default function MemberDetail() {
           >
             PDF
           </motion.button>
-          <motion.button
-            onClick={handleRemove}
-            className="text-muted-foreground hover:text-destructive p-2 rounded-xl hover:bg-destructive/10 transition-colors"
-            whileTap={{ scale: 0.9 }}
-          >
-            <Trash2 className="h-4 w-4" />
-          </motion.button>
+          {canManage ? (
+            <motion.button
+              onClick={handleRemove}
+              className="text-muted-foreground hover:text-destructive p-2 rounded-xl hover:bg-destructive/10 transition-colors"
+              whileTap={{ scale: 0.9 }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </motion.button>
+          ) : null}
         </div>
         {member.notes && (
           <motion.div
@@ -369,6 +417,65 @@ export default function MemberDetail() {
             <span className="font-medium text-foreground/70">Medical Notes:</span> {member.notes}
           </motion.div>
         )}
+
+        <motion.div
+          className="mt-3 rounded-2xl border border-border/40 bg-muted/25 px-4 py-3 space-y-2"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="flex items-center gap-2">
+            <Users className="h-3.5 w-3.5 text-muted-foreground" />
+            <p className="text-xs font-semibold text-foreground">Care collaborators</p>
+          </div>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Shared timeline — everyone below can appear as a contributor on entries. Admins and contributors can assign the formal care team.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {timelineContributorIds.map((cid) => (
+              <span
+                key={cid}
+                className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/25"
+                title={contributorLabel(cid)}
+              >
+                {contributorLabel(cid)}
+              </span>
+            ))}
+            {timelineContributorIds.length === 0 ? (
+              <span className="text-[11px] text-muted-foreground">No log activity yet.</span>
+            ) : null}
+          </div>
+          {canManage && familyUsers.length > 0 ? (
+            <div className="space-y-2 border-t border-border/30 pt-2 mt-1">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Assigned team</p>
+              <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                {familyUsers.map((u) => (
+                  <label key={u.id} className="flex items-center gap-2 text-[11px] text-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="rounded border-border"
+                      checked={careSelection.includes(u.id)}
+                      onChange={(e) => {
+                        setCareSelection((prev) =>
+                          e.target.checked ? [...prev, u.id] : prev.filter((x) => x !== u.id)
+                        );
+                      }}
+                    />
+                    <span className="truncate">{u.name}</span>
+                    <span className="text-muted-foreground shrink-0">({displayRoleLabel(u.role)})</span>
+                  </label>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={saveCareCollaborators}
+                disabled={savingCareTeam}
+                className="text-[11px] rounded-lg px-3 py-1.5 bg-accent text-accent-foreground disabled:opacity-50"
+              >
+                {savingCareTeam ? "Saving…" : "Save care team"}
+              </button>
+            </div>
+          ) : null}
+        </motion.div>
       </motion.div>
 
       {/* AI Insights strip */}
@@ -417,12 +524,77 @@ export default function MemberDetail() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {memberCareGuidance.length > 0 && (
+          <motion.div
+            className="px-5 py-4"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-6 w-6 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/15">
+                <Stethoscope className="h-3.5 w-3.5 text-primary" aria-hidden />
+              </div>
+              <span className="text-sm font-display font-semibold text-foreground">Suggested care guidance</span>
+              <span className="text-xs text-muted-foreground">Patterns in notes</span>
+            </div>
+            <div className="space-y-2.5">
+              {memberCareGuidance.map((row, i) => (
+                <motion.div
+                  key={row.id}
+                  className="glass-card rounded-xl p-3.5 border border-border/50 space-y-2"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                >
+                  <div className="flex flex-wrap items-start gap-2 gap-y-1">
+                    <p className="text-xs font-semibold text-foreground leading-snug">{row.symptomLabel}</p>
+                    <span
+                      className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium capitalize ${careUrgencyClasses(
+                        row.urgency
+                      )}`}
+                    >
+                      {row.urgency}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground leading-snug">{row.category}</p>
+                  <p className="text-[11px] text-foreground/85 leading-relaxed">
+                    <span className="font-medium text-foreground/90">Consider discussing with:</span> {row.suggestedSpecialist}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">{row.explanation}</p>
+                  {row.evidenceLogIds.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {row.evidenceLogIds.slice(0, 5).map((logId) => (
+                        <button
+                          key={`${row.id}-${logId}`}
+                          type="button"
+                          title={formatEvidenceLogLabel(logId, logs, { maxLen: 120 })}
+                          onClick={() => openSourceLog(logId)}
+                          className="inline-flex items-center max-w-[min(100%,14rem)] rounded-md border border-border/70 bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors text-left truncate"
+                        >
+                          {formatEvidenceLogLabel(logId, logs, { maxLen: 48 })}
+                        </button>
+                      ))}
+                      {row.evidenceLogIds.length > 5 ? (
+                        <span className="text-[10px] text-muted-foreground py-0.5">+{row.evidenceLogIds.length - 5}</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </motion.div>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-3 leading-relaxed">{careGuidanceDisclaimer}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="px-5 py-2">
         <div className="glass-card rounded-2xl p-4 border border-border/40 space-y-3 mb-3">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-display font-semibold text-foreground">Doctor Visit Summary</p>
-              <p className="section-subtitle">Readable 30-day clinical handoff snapshot</p>
+              <p className="text-sm font-display font-semibold text-foreground">Doctor visit handoff</p>
+              <p className="section-subtitle">30-day observational snapshot for appointments (not a diagnosis)</p>
             </div>
             <button
               type="button"
@@ -436,7 +608,7 @@ export default function MemberDetail() {
             <p className="text-xs text-muted-foreground">Preparing summary...</p>
           ) : doctorSummary ? (
             <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">{doctorSummary.summary}</p>
+              <p className="text-xs text-muted-foreground">{doctorSummary.observationalSummary}</p>
               <ul className="space-y-1">
                 {doctorSummary.recurringSymptoms.slice(0, 3).map((item) => (
                   <li key={item.symptom} className="text-[11px] text-foreground/85">• {item.symptom} ({item.count})</li>
@@ -509,12 +681,12 @@ export default function MemberDetail() {
                                 <p key={`${hl.title}-${snip.logId}`} className="text-[10px] text-muted-foreground/90">
                                   <button
                                     type="button"
-                                    className="underline underline-offset-2"
+                                    className="underline underline-offset-2 text-left"
+                                    title={formatEvidenceLogLabel(snip.logId, logs, { snippet: snip.snippet, maxLen: 160 })}
                                     onClick={() => openSourceLog(snip.logId)}
                                   >
-                                    {snip.logId}
+                                    {formatEvidenceLogLabel(snip.logId, logs, { snippet: snip.snippet, maxLen: 56 })}
                                   </button>
-                                  : {snip.snippet}
                                 </p>
                               ))}
                             </div>
@@ -572,10 +744,11 @@ export default function MemberDetail() {
                         <button
                           key={`${event.id}-${logId}`}
                           type="button"
+                          title={formatEvidenceLogLabel(logId, logs, { maxLen: 120 })}
                           onClick={() => openSourceLog(logId)}
-                          className="inline-flex items-center rounded-md border border-border/70 bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
+                          className="inline-flex items-center max-w-[min(100%,14rem)] rounded-md border border-border/70 bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted transition-colors text-left truncate"
                         >
-                          {logId}
+                          {formatEvidenceLogLabel(logId, logs, { maxLen: 44 })}
                         </button>
                       ))}
                     </div>
@@ -649,27 +822,41 @@ export default function MemberDetail() {
                         <span className="text-[11px] text-muted-foreground font-medium">
                           {format(new Date(log.timestamp), "h:mm a")}
                         </span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <motion.button
-                          type="button"
-                          onClick={() => setEditingLog(log)}
-                          className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-muted/80 shrink-0"
-                          whileTap={{ scale: 0.92 }}
-                          aria-label="Edit log"
+                        <span
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-muted/80 text-foreground/80 border border-border/50 shrink-0"
+                          title={inferLogSourceTypeUi(log) === "self" ? "Personal log" : "Caregiver observation"}
                         >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </motion.button>
-                        <motion.button
-                          type="button"
-                          onClick={() => handleDeleteLog(log)}
-                          className="text-muted-foreground hover:text-destructive p-1.5 rounded-lg hover:bg-destructive/10 shrink-0"
-                          whileTap={{ scale: 0.92 }}
-                          aria-label="Delete log"
+                          {inferLogSourceTypeUi(log) === "self" ? "Personal" : "Observation"}
+                        </span>
+                        <span
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-muted/80 text-foreground/80 border border-border/50 truncate max-w-[140px]"
+                          title={`${contributorLabel(log.contributorId)} · ${displayRoleLabel(log.contributorRole)}`}
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </motion.button>
+                          {contributorLabel(log.contributorId)} · {displayRoleLabel(log.contributorRole)}
+                        </span>
                       </div>
+                      {canModifyLogInUi(user, log) ? (
+                        <div className="flex items-center gap-1">
+                          <motion.button
+                            type="button"
+                            onClick={() => setEditingLog(log)}
+                            className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-muted/80 shrink-0"
+                            whileTap={{ scale: 0.92 }}
+                            aria-label="Edit log"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </motion.button>
+                          <motion.button
+                            type="button"
+                            onClick={() => handleDeleteLog(log)}
+                            className="text-muted-foreground hover:text-destructive p-1.5 rounded-lg hover:bg-destructive/10 shrink-0"
+                            whileTap={{ scale: 0.92 }}
+                            aria-label="Delete log"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </motion.button>
+                        </div>
+                      ) : null}
                     </div>
                     <p className="text-sm text-foreground leading-relaxed">{log.text}</p>
                     {log.type === "voice" && log.transcriptionStatus && (
@@ -687,9 +874,14 @@ export default function MemberDetail() {
                             ? "Transcript ready"
                             : log.transcriptionStatus === "failed"
                               ? "Transcription failed"
-                              : "Transcription in progress"}
+                              : log.transcriptionStatus === "processing"
+                                ? "Transcribing on server…"
+                                : "Queued for transcription"}
                         </span>
                       </div>
+                    )}
+                    {log.type === "voice" && log.audioUrl && log.rawAudioMetadata?.storage === "disk" && (
+                      <VoiceLogAudio audioPath={log.audioUrl} token={token} />
                     )}
                     {log.tags && log.tags.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-2">
@@ -731,17 +923,19 @@ export default function MemberDetail() {
       </div>
 
       {/* FAB */}
-      <motion.button
-        onClick={() => setShowAddLog(true)}
-        className="fixed fab-above-dock right-5 sm:right-6 h-14 w-14 rounded-2xl bg-accent shadow-glow-lg flex items-center justify-center z-50"
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.9 }}
-        initial={{ scale: 0, rotate: -180 }}
-        animate={{ scale: 1, rotate: 0 }}
-        transition={{ type: "spring", stiffness: 200, delay: 0.4 }}
-      >
-        <Plus className="h-6 w-6 text-primary-foreground" />
-      </motion.button>
+      {canAddLog ? (
+        <motion.button
+          onClick={() => setShowAddLog(true)}
+          className="fixed fab-above-dock right-5 sm:right-6 h-14 w-14 rounded-2xl bg-accent shadow-glow-lg flex items-center justify-center z-50"
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          initial={{ scale: 0, rotate: -180 }}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: "spring", stiffness: 200, delay: 0.4 }}
+        >
+          <Plus className="h-6 w-6 text-primary-foreground" />
+        </motion.button>
+      ) : null}
 
       <AddLogDialog open={showAddLog} onClose={() => setShowAddLog(false)} memberId={member.id} />
       <EditLogDialog open={!!editingLog} onClose={() => setEditingLog(null)} log={editingLog} />

@@ -30,12 +30,18 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
   const [text, setText] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
-  const [voiceFile, setVoiceFile] = useState<File | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [voiceFile, setVoiceFile] = useState<File | null>(null);
+  const [voiceUploading, setVoiceUploading] = useState(false);
+  const [captureSource, setCaptureSource] = useState<"recording" | "upload" | null>(null);
+  const [recordingDurationSec, setRecordingDurationSec] = useState<number | null>(null);
+  const [recordingStartMs, setRecordingStartMs] = useState<number | null>(null);
+  const [recordingTick, setRecordingTick] = useState(0);
   const member = members.find((m) => m.id === memberId);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  const recordingStartedAtRef = useRef<number | null>(null);
   const dialogOpenRef = useRef(open);
   dialogOpenRef.current = open;
 
@@ -60,11 +66,21 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
     setShowSuggestions(true);
     setSelectedTags([]);
     setVoiceFile(null);
+    setVoiceUploading(false);
+    setCaptureSource(null);
+    setRecordingDurationSec(null);
+    setRecordingStartMs(null);
     discardRecordingUi();
     return () => {
       discardRecordingUi();
     };
   }, [open, discardRecordingUi]);
+
+  useEffect(() => {
+    if (!isRecording || !recordingStartedAtRef.current) return;
+    const id = window.setInterval(() => setRecordingTick((t) => t + 1), 500);
+    return () => window.clearInterval(id);
+  }, [isRecording]);
 
   const handleSubmit = () => {
     if (!text.trim()) return;
@@ -97,13 +113,24 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       chunksRef.current = [];
-      const mr = new MediaRecorder(stream);
+      const preferredMime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : "";
+      const mr = preferredMime ? new MediaRecorder(stream, { mimeType: preferredMime }) : new MediaRecorder(stream);
       mediaRecorderRef.current = mr;
       mr.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
       mr.onstop = () => {
         stopMicStream();
+        const started = recordingStartedAtRef.current;
+        recordingStartedAtRef.current = null;
+        setRecordingStartMs(null);
+        if (started) {
+          setRecordingDurationSec(Math.max(0.5, (Date.now() - started) / 1000));
+        }
         const blob = new Blob(chunksRef.current, {
           type: mr.mimeType && mr.mimeType !== "" ? mr.mimeType : "audio/webm"
         });
@@ -111,11 +138,16 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
         const ext = blob.type.includes("webm") ? "webm" : blob.type.includes("mp4") ? "m4a" : "webm";
         if (dialogOpenRef.current) {
           setVoiceFile(new File([blob], `voice.${ext}`, { type: blob.type }));
+          setCaptureSource("recording");
         }
         setIsRecording(false);
         mediaRecorderRef.current = null;
       };
-      mr.start();
+      const t0 = Date.now();
+      recordingStartedAtRef.current = t0;
+      setRecordingStartMs(t0);
+      setRecordingDurationSec(null);
+      mr.start(1000);
       setIsRecording(true);
     } catch {
       toastError(
@@ -137,14 +169,25 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
 
   const handleVoiceUpload = () => {
     if (!voiceFile) return;
-    addVoiceLog(memberId, voiceFile, text.trim() || undefined)
+    setVoiceUploading(true);
+    const client =
+      captureSource === "recording" && recordingDurationSec != null
+        ? { durationSec: recordingDurationSec, source: "recording" as const }
+        : captureSource === "upload"
+          ? { source: "upload" as const }
+          : captureSource === "recording"
+            ? { source: "recording" as const }
+            : undefined;
+    addVoiceLog(memberId, voiceFile, text.trim() || undefined, client)
       .then(() => {
         setText("");
         setVoiceFile(null);
         setSelectedTags([]);
         setIsRecording(false);
+        setCaptureSource(null);
+        setRecordingDurationSec(null);
         toast.success("Voice log uploaded", {
-          description: `Added voice note for ${member?.name}. Transcript will update shortly.`
+          description: `Added voice note for ${member?.name}. Transcription runs in the background — your timeline will refresh automatically.`
         });
         onClose();
       })
@@ -154,7 +197,8 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
           "Voice note not uploaded",
           "We could not upload the recording. Check your connection and file size, then try again."
         )
-      );
+      )
+      .finally(() => setVoiceUploading(false));
   };
 
   const handleSuggestionClick = (suggestion: string) => {
@@ -192,8 +236,15 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
           />
           <input
             type="file"
-            accept="audio/*"
-            onChange={(e) => setVoiceFile(e.target.files?.[0] || null)}
+            accept="audio/*,.mp3,.wav,.webm,.m4a,.ogg,.aac,.flac"
+            onChange={(e) => {
+              const f = e.target.files?.[0] || null;
+              setVoiceFile(f);
+              if (f) {
+                setCaptureSource("upload");
+                setRecordingDurationSec(null);
+              }
+            }}
             className="text-xs text-muted-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-primary"
           />
           <div className="flex flex-wrap gap-2">
@@ -281,10 +332,11 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
             <motion.div className="flex-1" whileTap={{ scale: 0.98 }}>
               <Button
                 onClick={voiceFile ? handleVoiceUpload : handleSubmit}
-                disabled={!text.trim() && !voiceFile}
+                disabled={(!text.trim() && !voiceFile) || voiceUploading}
                 className="w-full gap-2 bg-accent hover:bg-accent/90 border-0 rounded-xl shadow-glow"
               >
-                <Send className="h-4 w-4" /> {voiceFile ? "Upload Voice Log" : "Save Log"}
+                <Send className="h-4 w-4" />{" "}
+                {voiceUploading ? "Uploading…" : voiceFile ? "Save voice log" : "Save Log"}
               </Button>
             </motion.div>
           </div>
@@ -303,11 +355,22 @@ export default function AddLogDialog({ open, onClose, memberId }: AddLogDialogPr
                   transition={{ duration: 1, repeat: Infinity }}
                 />
                 <span className="text-xs">
-                  Recording… tap Stop recording, then Save or Upload Voice Log. Transcription runs on the server.
+                  Recording… tap Stop recording, then Save voice log. Long pauses and background noise are fine — we transcribe with Whisper when configured, then extract tags with the same AI pipeline as typed notes.
                 </span>
+                {recordingStartMs != null ? (
+                  <span className="text-[10px] text-muted-foreground tabular-nums" data-tick={recordingTick}>
+                    {Math.max(1, Math.round((Date.now() - recordingStartMs) / 1000))}s
+                  </span>
+                ) : null}
               </motion.div>
             )}
           </AnimatePresence>
+
+          {voiceUploading && (
+            <p className="text-xs text-muted-foreground bg-primary/5 border border-primary/15 rounded-xl px-3 py-2">
+              Uploading audio and starting transcription… You can close this dialog after it finishes.
+            </p>
+          )}
 
           <p className="text-[11px] text-muted-foreground bg-muted/40 rounded-xl px-3 py-2.5 leading-relaxed">
             💡 <span className="font-medium">Tip:</span> Be specific — mention symptoms, time, activities, and how they felt for better AI analysis.

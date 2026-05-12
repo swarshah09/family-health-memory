@@ -99,7 +99,7 @@ export async function authHttpFailure(
         title: "Sign-in unsuccessful",
         description:
           apiMessage === "Invalid credentials"
-            ? "The email or password you entered does not match our records. Check for typos, or create an account if you are new."
+            ? "The email or password does not match an active account. Check for typos. If you submitted a request to join a family, you cannot sign in until the organizer approves it—then use the same email and password you used on the request form."
             : apiMessage || "We could not verify your credentials. Try again, or reset your approach if you recently changed your password."
       };
     }

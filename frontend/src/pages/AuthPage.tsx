@@ -5,10 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Heart, ArrowRight, Sparkles, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AppRequestError, toastError, toastFromCaughtError } from "@/lib/toast-errors";
+import { toast } from "sonner";
 
 export default function AuthPage() {
-  const { login, signup } = useApp();
+  const { login, signup, requestFamilyMembership } = useApp();
   const [mode, setMode] = useState<"login" | "signup">("login");
+  const [signupFlow, setSignupFlow] = useState<"create" | "join">("create");
+  const [familyName, setFamilyName] = useState("");
+  const [joinFamilyId, setJoinFamilyId] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
@@ -21,7 +25,22 @@ export default function AuthPage() {
     try {
       await new Promise((r) => setTimeout(r, 400));
       if (mode === "login") await login(email, password);
-      else await signup(email, name, password);
+      else if (signupFlow === "join") {
+        if (!joinFamilyId.trim()) {
+          toastError("Family ID needed", "Paste the workspace ID your family organizer shared with you.");
+          return;
+        }
+        const { message } = await requestFamilyMembership({
+          email,
+          name,
+          password,
+          targetFamilyId: joinFamilyId.trim()
+        });
+        toast.success("Request sent", {
+          description: `${message}\n\nThe organizer will see a badge on Family and a banner on their dashboard.`
+        });
+        setMode("login");
+      } else await signup(email, name, password, { familyName: familyName.trim() || undefined });
     } catch (err) {
       if (err instanceof AppRequestError) {
         toastError(err.toastTitle, err.toastDescription);
@@ -95,7 +114,9 @@ export default function AuthPage() {
             </motion.div>
           </div>
           <h1 className="text-3xl font-display font-bold text-white">Family Health Memory</h1>
-          <p className="text-white/65 text-sm mt-1.5 font-medium tracking-[0.16em] uppercase">Shared care timeline and insights</p>
+          <p className="text-white/65 text-sm mt-1.5 font-medium tracking-[0.16em] uppercase">
+            Private family workspace — invite only, not a social network
+          </p>
         </motion.div>
 
         {/* Form card */}
@@ -109,18 +130,65 @@ export default function AuthPage() {
             <AnimatePresence mode="wait">
               {mode === "signup" && (
                 <motion.div
-                  key="name"
+                  key="signup-extra"
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   transition={{ duration: 0.25 }}
+                  className="space-y-3 mb-1"
                 >
+                  <div className="rounded-xl border border-border/50 bg-muted/30 p-3 space-y-2">
+                    <p className="text-[11px] font-medium text-foreground">How do you want to get started?</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSignupFlow("create")}
+                        className={`flex-1 text-[11px] rounded-lg py-2 px-2 border transition-colors ${
+                          signupFlow === "create"
+                            ? "border-primary bg-primary/10 text-primary font-semibold"
+                            : "border-border/60 text-muted-foreground"
+                        }`}
+                      >
+                        Create new family
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSignupFlow("join")}
+                        className={`flex-1 text-[11px] rounded-lg py-2 px-2 border transition-colors ${
+                          signupFlow === "join"
+                            ? "border-primary bg-primary/10 text-primary font-semibold"
+                            : "border-border/60 text-muted-foreground"
+                        }`}
+                      >
+                        Join existing family
+                      </button>
+                    </div>
+                  </div>
+                  {signupFlow === "create" ? (
+                    <Input
+                      placeholder="Family workspace name (e.g. The Shah family)"
+                      value={familyName}
+                      onChange={(e) => setFamilyName(e.target.value)}
+                      autoComplete="organization"
+                      className="h-12 bg-background/60 border-border/60 rounded-xl focus:border-primary/40 focus:ring-primary/20"
+                    />
+                  ) : (
+                    <Input
+                      placeholder="Family workspace ID (from your organizer)"
+                      value={joinFamilyId}
+                      onChange={(e) => setJoinFamilyId(e.target.value)}
+                      required={signupFlow === "join"}
+                      autoComplete="off"
+                      className="h-12 bg-background/60 border-border/60 rounded-xl focus:border-primary/40 focus:ring-primary/20"
+                    />
+                  )}
                   <Input
                     placeholder="Your name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     required
-                    className="h-12 bg-background/60 border-border/60 rounded-xl mb-3.5 focus:border-primary/40 focus:ring-primary/20"
+                    autoComplete="name"
+                    className="h-12 bg-background/60 border-border/60 rounded-xl focus:border-primary/40 focus:ring-primary/20"
                   />
                 </motion.div>
               )}
@@ -131,6 +199,7 @@ export default function AuthPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
+              autoComplete={mode === "login" ? "username" : "email"}
               className="h-12 bg-background/60 border-border/60 rounded-xl focus:border-primary/40 focus:ring-primary/20"
             />
             <div className="relative">
@@ -166,7 +235,11 @@ export default function AuthPage() {
                   />
                 ) : (
                   <>
-                    {mode === "login" ? "Sign in securely" : "Create account"}
+                    {mode === "login"
+                      ? "Sign in securely"
+                      : signupFlow === "join"
+                        ? "Send join request"
+                        : "Create private workspace"}
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}

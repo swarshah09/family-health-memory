@@ -1,17 +1,67 @@
 export type Severity = "info" | "warning" | "alert";
+/** @deprecated Legacy care-team roles; prefer {@link FamilyRole}. Kept for DB migration and log contributorRole. */
 export type UserRole = "owner" | "caregiver" | "viewer";
+export type WorkspaceRole = "head" | "member";
+/** Family workspace permission: multiple HEADs allowed; MEMBER read-all, edit-own logs only. */
+export type FamilyRole = "HEAD" | "MEMBER";
+export type LogVisibility = "private" | "family";
+export type LogSourceType = "self" | "caregiver";
+export type LogAccessPermissionLevel = "VIEW_ONLY" | "CONTRIBUTOR" | "FULL_ACCESS";
+
+/** Explicit care-team assignment on a member profile (metadata for collaborators). */
+export interface ContributorLink {
+  userId: string;
+  note?: string;
+  /** ISO timestamp when this person was linked to the care team */
+  since?: string;
+}
 export type InsightType = "trend" | "frequency" | "correlation" | "anomaly" | "red_flag";
 export type InsightPriority = "low" | "medium" | "high";
 
 export interface FamilyMember {
   id: string;
   familyId: string;
+  /** If set, this care profile is bound to that family user account (personal health). */
+  linkedUserId?: string;
   name: string;
   age: number;
   relationship: string;
   notes?: string;
+  /** Family users designated as collaborators for this profile (multiple contributors). */
+  careCollaborators?: ContributorLink[];
   createdAt: string;
 }
+
+/** Activity feed row aligned with audit events. */
+export interface FamilyActivityEvent {
+  id: string;
+  contributorId: string;
+  contributorName: string;
+  contributorEmail: string;
+  action: string;
+  timestamp: string;
+  targetType: string;
+  targetId?: string;
+  metadata: Record<string, unknown>;
+}
+
+/** Captured once at upload; extended after transcription completes. */
+export type VoiceRawAudioMetadata = {
+  mimeType: string;
+  sizeBytes: number;
+  fileExtension?: string;
+  storage: "disk" | "inline";
+  uploadedAt?: string;
+  /** Client-reported recording length when available (seconds). */
+  durationSec?: number;
+  /** How the clip was captured in the app. */
+  clientSource?: "recording" | "upload";
+  /** whisper-1, gemini, or fallback label */
+  transcriber?: string;
+  transcriptCharCount?: number;
+  whisperTemperature?: number;
+  transcriptionError?: string;
+};
 
 export interface HealthLog {
   id: string;
@@ -19,13 +69,21 @@ export interface HealthLog {
   memberId: string;
   createdBy: string;
   contributorId: string;
-  contributorRole: UserRole;
+  /** Legacy care-team roles or new HEAD/MEMBER. */
+  contributorRole: UserRole | FamilyRole;
+  /** Subject of the health record when the profile is linked to a user account; absent for dependent-only profiles. */
+  ownerUserId?: string;
+  createdByUserId?: string;
+  sourceType?: LogSourceType;
+  /** private = subject + heads; family = broader family visibility for caregiver observations. */
+  visibility?: LogVisibility;
   text: string;
   type: "text" | "voice";
   tags: string[];
   audioUrl?: string;
   transcript?: string;
   transcriptionStatus?: "pending" | "processing" | "completed" | "failed";
+  rawAudioMetadata?: VoiceRawAudioMetadata;
   occurredAt: string;
   createdAt: string;
 }
@@ -59,10 +117,87 @@ export interface Insight {
 
 export interface AuthUser {
   id: string;
-  familyId: string;
+  /** Absent when the user has left their family and not yet joined another. */
+  familyId?: string;
   email: string;
   name: string;
-  role: UserRole;
+  familyRole: FamilyRole;
+  /** @deprecated Use familyRole */
+  role?: UserRole;
+  /** @deprecated Use familyRole === "HEAD" */
+  workspaceRole?: WorkspaceRole;
+  profilePictureUrl?: string;
+  description?: string;
+  /** Display name of the private family workspace (when configured). */
+  familyName?: string;
+}
+
+/** Structured activity row (also backed by audit logs). */
+export interface FamilyPermissionActivity {
+  id: string;
+  action: string;
+  actorId: string;
+  actorEmail: string;
+  targetUserId?: string;
+  timestamp: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface FamilyWorkspace {
+  familyId: string;
+  name: string;
+  createdByUserId: string;
+  createdAt: string;
+}
+
+export interface JoinFamilyRequestRow {
+  id: string;
+  targetFamilyId: string;
+  email: string;
+  name: string;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+}
+
+export interface LogAccessGrantRow {
+  id: string;
+  familyId: string;
+  granteeUserId: string;
+  memberProfileId: string;
+  permission: LogAccessPermissionLevel;
+  grantedByUserId: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface MemberLogAccessRequestRow {
+  id: string;
+  familyId: string;
+  requesterUserId: string;
+  targetMemberId: string;
+  requestedPermission: LogAccessPermissionLevel;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+}
+
+/** Grounded conversational answer over family health logs (not medical advice). */
+export interface MemorySearchCitation {
+  logId: string;
+  memberId: string;
+  memberName: string;
+  occurredAt: string;
+  excerpt: string;
+  rationale?: string;
+}
+
+export interface MemorySearchResult {
+  answer: string;
+  citations: MemorySearchCitation[];
+  followUpSuggestions: string[];
+  confidence: "high" | "medium" | "low";
+  logsConsidered: number;
+  /** True when GEMINI_API_KEY is missing — UI can show setup hint */
+  modelDisabled?: boolean;
 }
 
 export interface WeeklyDigest {
@@ -88,4 +223,8 @@ export interface WeeklyDigest {
     newlyAppeared: string[];
     resolved: string[];
   };
+  /** Present when loaded from stored weekly digest documents */
+  weekStart?: string;
+  weekEnd?: string;
+  sourceLogIds?: string[];
 }

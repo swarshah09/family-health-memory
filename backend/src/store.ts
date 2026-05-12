@@ -1,39 +1,101 @@
 import bcrypt from "bcryptjs";
+import { createHash, randomBytes } from "crypto";
 import { v4 as uuid } from "uuid";
-import { FamilyMember, HealthLog, Insight, UserRole, WeeklyDigest } from "./types.js";
+import type { VoiceRawAudioMetadata } from "./types.js";
+import {
+  ContributorLink,
+  FamilyActivityEvent,
+  FamilyMember,
+  FamilyWorkspace,
+  FamilyRole,
+  HealthLog,
+  Insight,
+  JoinFamilyRequestRow,
+  LogAccessGrantRow,
+  LogAccessPermissionLevel,
+  LogSourceType,
+  MemberLogAccessRequestRow,
+  UserRole,
+  WeeklyDigest,
+  WorkspaceRole
+} from "./types.js";
 import {
   AutomationRunModel,
   AutomationSettingModel,
+  FamilyInvitationModel,
   FamilyMemberModel,
+  FamilyWorkspaceModel,
   HealthLogModel,
   InsightSnapshotModel,
   ChatMessageModel,
+  JoinFamilyRequestModel,
+  LogAccessGrantModel,
+  MemberLogAccessRequestModel,
   NotificationModel,
   PrecomputedInsightModel,
   WeeklyDigestModel,
   UserModel
 } from "./models.js";
+import {
+  buildMemberLinkedUserMap,
+  canSeeLogWithSets,
+  inferLogSourceType,
+  isHead,
+  listAccessibleMemberProfileIds,
+  listGrantedMemberProfileIds,
+  profileAllowsLogForViewer,
+  type ViewerContext
+} from "./workspace-permissions.js";
+import { deriveFamilyRoleFromLegacy, resolveWorkspaceRole } from "./family-roles.js";
+import { listAuditLogs } from "./audit.js";
 import { extractStructuredHealthSignal } from "./gemini.js";
 import { buildTimelineNarrative, type TimelineNarrativeEvent } from "./timeline-narrative.js";
 import { buildContextualReengagementPrompts, type ReengagementPrompt } from "./reengagement.js";
-import { buildDoctorVisitSummary } from "./doctor-summary.js";
+import { buildDoctorSummaryDocument } from "./doctor-summary-export/composer.js";
+import type { DoctorSummaryDocument } from "./doctor-summary-export/types.js";
+import { deleteVoiceArtifactIfExists } from "./voice-storage.js";
+
+function mapCareCollaborators(raw: unknown): ContributorLink[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const out: ContributorLink[] = [];
+  for (const row of raw) {
+    const r = row as { userId?: string; note?: string; since?: Date | string };
+    if (!r.userId) continue;
+    const since =
+      r.since instanceof Date
+        ? r.since.toISOString()
+        : typeof r.since === "string"
+          ? r.since
+          : undefined;
+    out.push({
+      userId: String(r.userId),
+      note: r.note ? String(r.note) : undefined,
+      since
+    });
+  }
+  return out.length ? out : undefined;
+}
 
 function mapMember(member: {
   _id: { toString: () => string };
   familyId: string;
+  linkedUserId?: string | null;
   name: string;
   age: number;
   relationship: string;
   notes?: string | null;
+  careCollaborators?: unknown;
   createdAt: Date;
 }): FamilyMember {
   return {
     id: member._id.toString(),
     familyId: member.familyId,
+    ...(member.linkedUserId ? { linkedUserId: String(member.linkedUserId) } : {}),
     name: member.name,
     age: member.age,
     relationship: member.relationship,
     notes: member.notes || undefined,
+    careCollaborators: mapCareCollaborators(member.careCollaborators),
     createdAt: member.createdAt.toISOString()
   };
 }
@@ -44,29 +106,53 @@ function mapLog(log: {
   memberId: string;
   createdBy: string;
   contributorId?: string;
-  contributorRole?: "owner" | "caregiver" | "viewer";
+  contributorRole?: "owner" | "caregiver" | "viewer" | "HEAD" | "MEMBER";
+  ownerUserId?: string | null;
+  createdByUserId?: string | null;
+  sourceType?: LogSourceType | null;
+  visibility?: "private" | "family" | null;
   text: string;
   type: "text" | "voice";
   tags?: string[];
   audioUrl?: string | null;
   transcript?: string | null;
   transcriptionStatus?: "pending" | "processing" | "completed" | "failed";
+  rawAudioMetadata?: VoiceRawAudioMetadata | null;
   occurredAt: Date;
   createdAt: Date;
 }): HealthLog {
+  const contributorId = String(log.contributorId || log.createdBy || "unknown");
+  const createdByUserId = String(log.createdByUserId || log.contributorId || log.createdBy || "unknown");
+  const ownerRaw =
+    log.ownerUserId != null && String(log.ownerUserId).trim() !== "" ? String(log.ownerUserId) : undefined;
+  const sourceType = inferLogSourceType({
+    sourceType: log.sourceType,
+    ownerUserId: ownerRaw,
+    createdByUserId,
+    contributorId
+  });
+  const ownerUserId =
+    ownerRaw !== undefined ? ownerRaw : sourceType === "self" ? createdByUserId : undefined;
+  const visibility =
+    log.visibility === "private" || log.visibility === "family" ? log.visibility : undefined;
   return {
     id: log._id.toString(),
     familyId: log.familyId,
     memberId: log.memberId,
     createdBy: log.createdBy,
-    contributorId: log.contributorId || log.createdBy || "unknown",
-    contributorRole: log.contributorRole || "viewer",
+    contributorId,
+    contributorRole: (log.contributorRole as HealthLog["contributorRole"]) || "viewer",
+    ownerUserId,
+    createdByUserId,
+    sourceType,
+    visibility,
     text: log.text,
     type: log.type,
     tags: log.tags || [],
     audioUrl: log.audioUrl || undefined,
     transcript: log.transcript || undefined,
     transcriptionStatus: log.transcriptionStatus || undefined,
+    rawAudioMetadata: log.rawAudioMetadata || undefined,
     occurredAt: log.occurredAt.toISOString(),
     createdAt: log.createdAt.toISOString()
   };
@@ -147,6 +233,9 @@ function mapWeeklyDigest(row: {
     resolved?: string[];
   } | null;
   generatedAt: Date;
+  weekStart?: Date;
+  weekEnd?: Date;
+  sourceLogIds?: string[];
 }): WeeklyDigest {
   return {
     id: row._id.toString(),
@@ -170,29 +259,78 @@ function mapWeeklyDigest(row: {
       symptomDecrease: row.comparison?.symptomDecrease || [],
       newlyAppeared: row.comparison?.newlyAppeared || [],
       resolved: row.comparison?.resolved || []
-    }
+    },
+    weekStart: row.weekStart ? row.weekStart.toISOString() : undefined,
+    weekEnd: row.weekEnd ? row.weekEnd.toISOString() : undefined,
+    sourceLogIds: Array.isArray(row.sourceLogIds) ? row.sourceLogIds.map(String) : undefined
   };
 }
 
-export async function signup(email: string, name: string, password: string) {
+async function mapUserToAuthProfile(user: {
+  _id: { toString: () => string };
+  familyId?: string | null;
+  email: string;
+  name: string;
+  role?: UserRole | null;
+  workspaceRole?: string | null;
+  familyRole?: string | null;
+  profilePictureUrl?: string | null;
+  description?: string | null;
+}): Promise<{
+  id: string;
+  familyId?: string;
+  email: string;
+  name: string;
+  familyRole: FamilyRole;
+  role: UserRole;
+  workspaceRole: WorkspaceRole;
+  familyName?: string;
+  profilePictureUrl?: string;
+  description?: string;
+}> {
+  const familyRole =
+    (user.familyRole as FamilyRole) || deriveFamilyRoleFromLegacy(user.role ?? null, user.workspaceRole);
+  const workspaceRole = resolveWorkspaceRole((user.role as UserRole) || "viewer", user.workspaceRole);
+  const legacyRole = (user.role as UserRole) || (familyRole === "HEAD" ? "owner" : "viewer");
+  const fid = user.familyId && String(user.familyId).trim() ? String(user.familyId) : undefined;
+  const fam = fid ? await FamilyWorkspaceModel.findOne({ familyId: fid }).lean() : null;
+  const familyName = fam?.name ? String(fam.name) : undefined;
+  return {
+    id: user._id.toString(),
+    ...(fid ? { familyId: fid } : {}),
+    email: user.email,
+    name: user.name,
+    familyRole,
+    role: legacyRole,
+    workspaceRole,
+    familyName,
+    ...(user.profilePictureUrl ? { profilePictureUrl: String(user.profilePictureUrl) } : {}),
+    ...(user.description ? { description: String(user.description) } : {})
+  };
+}
+
+export async function signup(email: string, name: string, password: string, familyName?: string) {
   const existing = await UserModel.findOne({ email: email.toLowerCase() });
   if (existing) throw new Error("EMAIL_EXISTS");
   const familyId = uuid();
   const passwordHash = await bcrypt.hash(password, 10);
+  const famName = (familyName?.trim() || "My family").slice(0, 120);
   const user = await UserModel.create({
     email: email.toLowerCase(),
     name,
     passwordHash,
     familyId,
-    role: "owner"
+    familyRole: "HEAD",
+    role: "owner",
+    workspaceRole: "head"
   });
-  return {
-    id: user._id.toString(),
-    familyId: user.familyId,
-    email: user.email,
-    name: user.name,
-    role: user.role as UserRole
-  };
+  await FamilyWorkspaceModel.create({
+    familyId,
+    name: famName,
+    createdByUserId: user._id.toString()
+  });
+  await ensurePersonalHealthMember(user._id.toString(), familyId, name);
+  return mapUserToAuthProfile(user);
 }
 
 export async function login(email: string, password: string) {
@@ -200,41 +338,84 @@ export async function login(email: string, password: string) {
   if (!user) throw new Error("INVALID_CREDENTIALS");
   const isValid = await bcrypt.compare(password, user.passwordHash);
   if (!isValid) throw new Error("INVALID_CREDENTIALS");
-  return {
-    id: user._id.toString(),
-    familyId: user.familyId,
-    email: user.email,
-    name: user.name,
-    role: user.role as UserRole
-  };
+  return mapUserToAuthProfile(user);
 }
 
 export async function listFamilyUsers(familyId: string) {
   const users = await UserModel.find({ familyId }).sort({ createdAt: 1 });
-  return users.map((user) => ({
-    id: user._id.toString(),
-    familyId: user.familyId,
-    email: user.email,
-    name: user.name,
-    role: user.role as UserRole
-  }));
+  return users.map((user) => {
+    const familyRole =
+      (user.familyRole as FamilyRole) || deriveFamilyRoleFromLegacy(user.role, user.workspaceRole);
+    return {
+      id: user._id.toString(),
+      familyId: user.familyId as string,
+      email: user.email,
+      name: user.name,
+      familyRole,
+      role: user.role as UserRole,
+      workspaceRole: resolveWorkspaceRole(user.role as UserRole, user.workspaceRole as string | undefined)
+    };
+  });
 }
 
-export async function updateFamilyUserRole(
-  familyId: string,
-  userId: string,
-  role: UserRole
-): Promise<void> {
+export async function updateFamilyUserRole(familyId: string, userId: string, role: UserRole): Promise<void> {
   await UserModel.updateOne({ _id: userId, familyId }, { $set: { role } });
+}
+
+/** Promote or demote HEAD ↔ MEMBER. Enforces at least one HEAD per family. */
+export async function setUserFamilyRole(
+  familyId: string,
+  _actorUserId: string,
+  targetUserId: string,
+  nextRole: FamilyRole
+): Promise<void> {
+  const target = await UserModel.findOne({ _id: targetUserId, familyId });
+  if (!target) throw new Error("USER_NOT_FOUND");
+  const current =
+    (target.familyRole as FamilyRole) || deriveFamilyRoleFromLegacy(target.role, target.workspaceRole);
+  if (current === "HEAD" && nextRole === "MEMBER") {
+    const otherHeads = await UserModel.countDocuments({
+      familyId,
+      familyRole: "HEAD",
+      _id: { $ne: targetUserId }
+    });
+    if (otherHeads < 1) throw new Error("LAST_HEAD");
+  }
+  const workspaceRole = nextRole === "HEAD" ? "head" : "member";
+  const legacyRole = nextRole === "HEAD" ? "owner" : "viewer";
+  await UserModel.updateOne(
+    { _id: targetUserId, familyId },
+    { $set: { familyRole: nextRole, workspaceRole, role: legacyRole } }
+  );
+}
+
+export type InviteFamilyUserResult =
+  | { status: "active"; id: string; email: string; name: string; role: UserRole }
+  | {
+      status: "pending";
+      invitationId: string;
+      email: string;
+      inviteeName: string;
+      role: UserRole;
+      rawToken: string;
+      expiresAt: string;
+    };
+
+function hashInviteToken(rawToken: string): string {
+  return createHash("sha256").update(rawToken.trim()).digest("hex");
 }
 
 export async function inviteFamilyUser(
   familyId: string,
   email: string,
   name: string,
-  role: UserRole
-): Promise<{ id: string; email: string; name: string; role: UserRole; temporaryPassword?: string }> {
+  role: UserRole,
+  invitedByUserId: string
+): Promise<InviteFamilyUserResult> {
   const normalizedEmail = email.toLowerCase();
+  if (role === "owner") {
+    throw new Error("INVITE_ROLE_NOT_ALLOWED");
+  }
   const existing = await UserModel.findOne({ email: normalizedEmail });
   if (existing && existing.familyId !== familyId) {
     throw new Error("EMAIL_IN_OTHER_FAMILY");
@@ -242,8 +423,11 @@ export async function inviteFamilyUser(
   if (existing && existing.familyId === familyId) {
     existing.role = role;
     existing.name = name;
+    if (!existing.workspaceRole) existing.workspaceRole = "member";
     await existing.save();
+    await ensurePersonalHealthMember(existing._id.toString(), familyId, existing.name);
     return {
+      status: "active",
       id: existing._id.toString(),
       email: existing.email,
       name: existing.name,
@@ -251,22 +435,103 @@ export async function inviteFamilyUser(
     };
   }
 
-  const temporaryPassword = Math.random().toString(36).slice(-10) + "A1!";
-  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
-  const user = await UserModel.create({
-    email: normalizedEmail,
-    name,
+  await FamilyInvitationModel.deleteMany({ familyId, email: normalizedEmail });
+  const rawToken = randomBytes(32).toString("hex");
+  const tokenHash = hashInviteToken(rawToken);
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const inv = await FamilyInvitationModel.create({
     familyId,
+    email: normalizedEmail,
+    inviteeName: name.trim(),
     role,
-    passwordHash
+    tokenHash,
+    invitedByUserId,
+    expiresAt
   });
   return {
-    id: user._id.toString(),
-    email: user.email,
-    name: user.name,
-    role: user.role as UserRole,
-    temporaryPassword
+    status: "pending",
+    invitationId: inv._id.toString(),
+    email: normalizedEmail,
+    inviteeName: name.trim(),
+    role,
+    rawToken,
+    expiresAt: expiresAt.toISOString()
   };
+}
+
+export async function getInvitationPreviewByToken(rawToken: string): Promise<{
+  email: string;
+  inviteeName: string;
+  role: UserRole;
+  invitedByName?: string;
+} | null> {
+  const tokenHash = hashInviteToken(rawToken);
+  const inv = await FamilyInvitationModel.findOne({ tokenHash, expiresAt: { $gt: new Date() } });
+  if (!inv) return null;
+  let invitedByName: string | undefined;
+  if (inv.invitedByUserId) {
+    const u = await UserModel.findById(inv.invitedByUserId);
+    invitedByName = u?.name;
+  }
+  return {
+    email: inv.email,
+    inviteeName: inv.inviteeName,
+    role: inv.role as UserRole,
+    invitedByName
+  };
+}
+
+export async function acceptFamilyInvitation(
+  rawToken: string,
+  password: string,
+  name?: string
+): Promise<Awaited<ReturnType<typeof mapUserToAuthProfile>>> {
+  const tokenHash = hashInviteToken(rawToken);
+  const inv = await FamilyInvitationModel.findOne({ tokenHash, expiresAt: { $gt: new Date() } });
+  if (!inv) throw new Error("INVITE_INVALID_OR_EXPIRED");
+  const normalizedEmail = inv.email;
+  const stillExist = await UserModel.findOne({ email: normalizedEmail });
+  if (stillExist) {
+    await FamilyInvitationModel.deleteOne({ _id: inv._id });
+    throw new Error("EMAIL_ALREADY_REGISTERED");
+  }
+  const passwordHash = await bcrypt.hash(password, 10);
+  const finalName = (name?.trim() || inv.inviteeName || "Contributor").slice(0, 120);
+  const user = await UserModel.create({
+    email: normalizedEmail,
+    name: finalName,
+    familyId: inv.familyId,
+    role: inv.role as UserRole,
+    familyRole: "MEMBER",
+    workspaceRole: "member",
+    passwordHash
+  });
+  await ensurePersonalHealthMember(user._id.toString(), String(inv.familyId), finalName);
+  await FamilyInvitationModel.deleteOne({ _id: inv._id });
+  return mapUserToAuthProfile(user);
+}
+
+export async function listFamilyActivity(familyId: string, limit = 60): Promise<FamilyActivityEvent[]> {
+  const [{ rows }, users] = await Promise.all([
+    listAuditLogs(familyId, { limit: Math.min(Math.max(limit, 1), 120) }),
+    listFamilyUsers(familyId)
+  ]);
+  const byId = new Map(users.map((u) => [u.id, u]));
+  return rows.map((row) => {
+    const u = row.actorUserId ? byId.get(row.actorUserId) : undefined;
+    const contributorName = u?.name || row.actorEmail;
+    return {
+      id: row.id,
+      contributorId: row.actorUserId || u?.id || "unknown",
+      contributorName,
+      contributorEmail: row.actorEmail,
+      action: row.action,
+      timestamp: row.createdAt,
+      targetType: row.targetType,
+      targetId: row.targetId,
+      metadata: row.metadata
+    };
+  });
 }
 
 export async function listMembers(familyId: string): Promise<FamilyMember[]> {
@@ -276,9 +541,27 @@ export async function listMembers(familyId: string): Promise<FamilyMember[]> {
 
 export async function createMember(
   familyId: string,
-  payload: Omit<FamilyMember, "id" | "familyId" | "createdAt">
+  payload: Omit<FamilyMember, "id" | "familyId" | "createdAt" | "linkedUserId">
 ): Promise<FamilyMember> {
   const member = await FamilyMemberModel.create({ familyId, ...payload });
+  return mapMember(member);
+}
+
+/** Idempotent personal health profile for a family user (My Health). */
+export async function ensurePersonalHealthMember(
+  userId: string,
+  familyId: string,
+  displayName: string
+): Promise<FamilyMember> {
+  const existing = await FamilyMemberModel.findOne({ familyId, linkedUserId: userId });
+  if (existing) return mapMember(existing);
+  const member = await FamilyMemberModel.create({
+    familyId,
+    linkedUserId: userId,
+    name: displayName.slice(0, 120),
+    age: 0,
+    relationship: "Self"
+  });
   return mapMember(member);
 }
 
@@ -287,16 +570,36 @@ export async function deleteMember(familyId: string, memberId: string): Promise<
   await HealthLogModel.deleteMany({ memberId, familyId });
 }
 
+export async function deleteFamilyMemberIfAllowed(familyId: string, memberId: string): Promise<void> {
+  const row = await FamilyMemberModel.findOne({ _id: memberId, familyId }).lean();
+  if (!row) throw new Error("MEMBER_NOT_FOUND");
+  if (row.linkedUserId) throw new Error("LINKED_MEMBER_DELETE_FORBIDDEN");
+  await deleteMember(familyId, memberId);
+}
+
 export async function updateMember(
   familyId: string,
   memberId: string,
-  payload: Partial<Pick<FamilyMember, "name" | "age" | "relationship" | "notes">>
+  payload: Partial<Pick<FamilyMember, "name" | "age" | "relationship" | "notes" | "careCollaborators">>
 ): Promise<FamilyMember | null> {
-  const next: Partial<{ name: string; age: number; relationship: string; notes?: string | null }> = {};
+  const next: Partial<{
+    name: string;
+    age: number;
+    relationship: string;
+    notes?: string | null;
+    careCollaborators: Array<{ userId: string; note?: string; since?: Date }>;
+  }> = {};
   if (payload.name !== undefined) next.name = payload.name;
   if (payload.age !== undefined) next.age = payload.age;
   if (payload.relationship !== undefined) next.relationship = payload.relationship;
   if (payload.notes !== undefined) next.notes = payload.notes || null;
+  if (payload.careCollaborators !== undefined) {
+    next.careCollaborators = payload.careCollaborators.map((c) => ({
+      userId: c.userId,
+      note: c.note,
+      since: c.since ? new Date(c.since) : new Date()
+    }));
+  }
 
   const updated = await FamilyMemberModel.findOneAndUpdate(
     { _id: memberId, familyId },
@@ -306,9 +609,71 @@ export async function updateMember(
   return updated ? mapMember(updated) : null;
 }
 
+/** Unrestricted listing (background jobs, insight precompute). */
 export async function listLogs(familyId: string, memberId?: string): Promise<HealthLog[]> {
   const filter = memberId ? { familyId, memberId } : { familyId };
   const result = await HealthLogModel.find(filter).sort({ occurredAt: -1 });
+  return result.map(mapLog);
+}
+
+/** Permission-aware listing for interactive API callers. */
+export async function listLogsForViewer(
+  familyId: string,
+  ctx: ViewerContext,
+  memberId?: string
+): Promise<HealthLog[]> {
+  const linkedMap = await buildMemberLinkedUserMap(familyId);
+  const passProfile = (doc: {
+    memberId?: unknown;
+    contributorId?: unknown;
+    ownerUserId?: unknown;
+    createdByUserId?: unknown;
+    sourceType?: string | null;
+    visibility?: string | null;
+  }) => {
+    const mid = String(doc.memberId ?? "");
+    if (!mid) return false;
+    const link = linkedMap.get(mid);
+    return profileAllowsLogForViewer(ctx, link, doc);
+  };
+
+  if (isHead(ctx)) {
+    const filter: Record<string, unknown> = { familyId };
+    if (memberId) filter.memberId = memberId;
+    const result = await HealthLogModel.find(filter).sort({ occurredAt: -1 }).limit(800).lean();
+    return result.filter((r) => passProfile(r)).map((r) => mapLog(r as never));
+  }
+  const [accessible, grants] = await Promise.all([
+    listAccessibleMemberProfileIds(familyId, ctx),
+    listGrantedMemberProfileIds(familyId, ctx.userId)
+  ]);
+  const accSet = new Set(accessible);
+  const grantSet = new Set(grants);
+  const filterMemberIds = memberId ? (accSet.has(memberId) ? [memberId] : []) : accessible;
+  if (filterMemberIds.length === 0) return [];
+  const filter: Record<string, unknown> = { familyId, memberId: memberId || { $in: filterMemberIds } };
+  const raw = await HealthLogModel.find(filter).sort({ occurredAt: -1 }).limit(800).lean();
+  const out = raw.filter((doc) => passProfile(doc) && canSeeLogWithSets(doc, ctx, grantSet, accSet));
+  return out.map((d) => mapLog(d as never));
+}
+
+/** Recent logs for AI memory search (bounded window + limit). */
+export async function listRecentLogsForFamily(
+  familyId: string,
+  opts: { memberId?: string; sinceDays?: number; limit?: number; viewer?: ViewerContext }
+): Promise<HealthLog[]> {
+  const sinceDays = opts.sinceDays ?? 180;
+  const limit = Math.min(Math.max(opts.limit ?? 400, 1), 600);
+  const since = new Date();
+  since.setDate(since.getDate() - sinceDays);
+  if (opts.viewer) {
+    const pool = await listLogsForViewer(familyId, opts.viewer, opts.memberId);
+    const sinceMs = since.getTime();
+    return pool.filter((l) => new Date(l.occurredAt).getTime() >= sinceMs).slice(0, limit);
+  }
+  const filter: Record<string, unknown> = { familyId, occurredAt: { $gte: since } };
+  if (opts.memberId) filter.memberId = opts.memberId;
+  const result = await HealthLogModel.find(filter).sort({ occurredAt: -1 }).limit(limit);
   return result.map(mapLog);
 }
 
@@ -319,39 +684,35 @@ export async function getLogById(familyId: string, logId: string): Promise<Healt
 
 export async function listTimelineNarrativeEvents(
   familyId: string,
-  memberId: string
+  memberId: string,
+  ctx?: ViewerContext
 ): Promise<TimelineNarrativeEvent[]> {
-  const logs = await listLogs(familyId, memberId);
+  const logs = ctx ? await listLogsForViewer(familyId, ctx, memberId) : await listLogs(familyId, memberId);
   return buildTimelineNarrative(logs);
 }
 
 export async function getDoctorVisitSummary(
   familyId: string,
   memberId: string,
-  days = 30
-): Promise<{
-  title: string;
-  periodLabel: string;
-  generatedAt: string;
-  recurringSymptoms: Array<{ symptom: string; count: number }>;
-  trendAnalysis: Array<{ symptom: string; count: number; previousCount: number; trend: "increasing" | "decreasing" | "stable" }>;
-  majorChangesTimeline: Array<{ date: string; event: string; details: string }>;
-  medicationObservations: string[];
-  summary: string;
-} | null> {
+  days = 30,
+  ctx?: ViewerContext
+): Promise<DoctorSummaryDocument | null> {
   const member = await FamilyMemberModel.findOne({ _id: memberId, familyId });
   if (!member) return null;
-  const [logs, insights, timelineEvents] = await Promise.all([
-    listLogs(familyId, memberId),
-    listLatestPrecomputedInsightsForFamily(familyId).then((rows) => rows.filter((r) => r.memberId === memberId)),
-    listTimelineNarrativeEvents(familyId, memberId)
+  const boundedDays = Math.min(Math.max(days, 7), 90);
+  const [logs, insights, timelineEvents, weeklyDigests] = await Promise.all([
+    ctx ? listLogsForViewer(familyId, ctx, memberId) : listLogs(familyId, memberId),
+    getLatestPrecomputedInsightsForMember(familyId, memberId),
+    listTimelineNarrativeEvents(familyId, memberId, ctx),
+    listDigestsForFamilyPerson(familyId, memberId)
   ]);
-  return buildDoctorVisitSummary({
+  return buildDoctorSummaryDocument({
     memberName: member.name,
     logs,
     insights,
     timelineEvents,
-    days
+    weeklyDigests,
+    days: boundedDays
   });
 }
 
@@ -368,17 +729,60 @@ export async function createLog(
     audioUrl?: string;
     tags?: string[];
     audioBase64?: string;
+    rawAudioMetadata?: VoiceRawAudioMetadata;
     contributorId?: string;
-    contributorRole?: UserRole;
+    contributorRole?: UserRole | FamilyRole;
+    ownerUserId?: string;
+    createdByUserId?: string;
+    sourceType?: LogSourceType;
+    visibility?: "private" | "family";
   }
 ): Promise<HealthLog> {
+  const contributorId = String(payload.contributorId || payload.createdBy || "unknown");
+  const createdByUserId = String(payload.createdByUserId || contributorId);
+  const row = await FamilyMemberModel.findOne({ _id: payload.memberId, familyId })
+    .select("linkedUserId")
+    .lean();
+  const subjectUserId = row?.linkedUserId ? String(row.linkedUserId) : undefined;
+  const explicitSource = payload.sourceType;
+  const sourceType: LogSourceType =
+    explicitSource === "self" || explicitSource === "caregiver"
+      ? explicitSource
+      : subjectUserId && subjectUserId === createdByUserId
+        ? "self"
+        : "caregiver";
+  const ownerUserId =
+    payload.ownerUserId !== undefined && payload.ownerUserId !== ""
+      ? String(payload.ownerUserId)
+      : subjectUserId !== undefined
+        ? subjectUserId
+        : undefined;
+  const visibility: "private" | "family" =
+    payload.visibility === "family" || payload.visibility === "private"
+      ? payload.visibility
+      : sourceType === "self"
+        ? "private"
+        : "family";
+
   const log = await HealthLogModel.create({
     familyId,
-    ...payload,
-    contributorId: payload.contributorId || payload.createdBy || "unknown",
-    contributorRole: payload.contributorRole || "viewer",
+    memberId: payload.memberId,
+    createdBy: payload.createdBy,
+    text: payload.text,
+    type: payload.type,
+    occurredAt: new Date(payload.occurredAt),
+    transcript: payload.transcript,
+    transcriptionStatus: payload.transcriptionStatus,
+    audioUrl: payload.audioUrl,
     tags: payload.tags || [],
-    occurredAt: new Date(payload.occurredAt)
+    audioBase64: payload.audioBase64,
+    rawAudioMetadata: payload.rawAudioMetadata,
+    contributorId,
+    contributorRole: payload.contributorRole || "MEMBER",
+    ownerUserId,
+    createdByUserId,
+    sourceType,
+    visibility
   });
   return mapLog(log);
 }
@@ -404,8 +808,14 @@ export async function updateLog(
 }
 
 export async function deleteLog(familyId: string, logId: string): Promise<HealthLog | null> {
-  const removed = await HealthLogModel.findOneAndDelete({ _id: logId, familyId });
-  return removed ? mapLog(removed) : null;
+  const existing = await HealthLogModel.findOne({ _id: logId, familyId });
+  if (!existing) return null;
+  const meta = existing.rawAudioMetadata as VoiceRawAudioMetadata | undefined | null;
+  if (meta?.storage === "disk" && meta.fileExtension) {
+    await deleteVoiceArtifactIfExists(logId, meta.fileExtension);
+  }
+  await HealthLogModel.deleteOne({ _id: logId, familyId });
+  return mapLog(existing);
 }
 
 export async function listInsights(familyId: string): Promise<Insight[]> {
@@ -432,6 +842,11 @@ export async function listDigestsForUserPerson(
   return rows.map(mapWeeklyDigest);
 }
 
+export async function listDigestsForFamilyPerson(familyId: string, personId: string): Promise<WeeklyDigest[]> {
+  const rows = await WeeklyDigestModel.find({ familyId, personId }).sort({ generatedAt: -1 }).limit(36);
+  return rows.map(mapWeeklyDigest);
+}
+
 export async function listLatestPrecomputedInsightsForFamily(familyId: string): Promise<Insight[]> {
   const rows = await PrecomputedInsightModel.find({ familyId }).sort({ generatedAt: -1 });
   const byPerson = new Map<string, Insight[]>();
@@ -443,6 +858,12 @@ export async function listLatestPrecomputedInsightsForFamily(familyId: string): 
     );
   }
   return [...byPerson.values()].flat().sort((a, b) => b.count - a.count).slice(0, 16);
+}
+
+export async function getLatestPrecomputedInsightsForMember(familyId: string, personId: string): Promise<Insight[]> {
+  const row = await PrecomputedInsightModel.findOne({ familyId, personId }).sort({ generatedAt: -1 });
+  if (!row) return [];
+  return ((row.insights as unknown[]) || []).map(mapStoredInsight).slice(0, 24);
 }
 
 export async function cacheInsightsSnapshot(familyId: string): Promise<void> {
@@ -623,12 +1044,21 @@ export async function updateAutomationSettings(
 }
 
 export async function listNotifications(familyId: string): Promise<
-  Array<{ id: string; memberId: string; message: string; severity: "info" | "warning" | "alert"; isRead: boolean; createdAt: string }>
+  Array<{
+    id: string;
+    memberId: string;
+    insightId: string;
+    message: string;
+    severity: "info" | "warning" | "alert";
+    isRead: boolean;
+    createdAt: string;
+  }>
 > {
   const results = await NotificationModel.find({ familyId }).sort({ createdAt: -1 }).limit(30);
   return results.map((item) => ({
     id: item._id.toString(),
     memberId: item.memberId,
+    insightId: item.insightId,
     message: item.message,
     severity: item.severity as "info" | "warning" | "alert",
     isRead: item.isRead,
@@ -760,4 +1190,373 @@ export async function runAutomationAnalysis(
     });
     throw error;
   }
+}
+
+export async function ensureFamilyWorkspaceRecord(familyId: string): Promise<FamilyWorkspace | null> {
+  const existing = await FamilyWorkspaceModel.findOne({ familyId }).lean();
+  if (existing) {
+    return {
+      familyId,
+      name: existing.name,
+      createdByUserId: String(existing.createdByUserId),
+      createdAt:
+        existing.createdAt instanceof Date ? existing.createdAt.toISOString() : new Date().toISOString()
+    };
+  }
+  const owner = await UserModel.findOne({ familyId, role: "owner" }).sort({ createdAt: 1 });
+  if (!owner) return null;
+  const created = await FamilyWorkspaceModel.create({
+    familyId,
+    name: "Family workspace",
+    createdByUserId: owner._id.toString()
+  });
+  return {
+    familyId,
+    name: created.name,
+    createdByUserId: String(created.createdByUserId),
+    createdAt: created.createdAt?.toISOString() || new Date().toISOString()
+  };
+}
+
+export async function requestJoinFamily(params: {
+  targetFamilyId: string;
+  email: string;
+  name: string;
+  password: string;
+}): Promise<{ id: string }> {
+  const targetFamilyId = params.targetFamilyId.trim();
+  const famUser = await UserModel.findOne({ familyId: targetFamilyId });
+  if (!famUser) throw new Error("FAMILY_NOT_FOUND");
+  const normalized = params.email.toLowerCase();
+  const dupUser = await UserModel.findOne({ email: normalized });
+  if (dupUser) throw new Error("EMAIL_EXISTS");
+  const pending = await JoinFamilyRequestModel.findOne({
+    targetFamilyId,
+    email: normalized,
+    status: "pending"
+  });
+  if (pending) throw new Error("JOIN_PENDING");
+  const passwordHash = await bcrypt.hash(params.password, 10);
+  const row = await JoinFamilyRequestModel.create({
+    targetFamilyId,
+    email: normalized,
+    name: params.name.trim().slice(0, 120),
+    passwordHash,
+    status: "pending"
+  });
+  const requestId = row._id.toString();
+  try {
+    await NotificationModel.create({
+      familyId: targetFamilyId,
+      memberId: "_workspace",
+      insightId: `join_request:${requestId}`,
+      message: `${params.name.trim()} (${normalized}) requested to join your family workspace. Open Family to approve or decline.`,
+      severity: "info",
+      isRead: false
+    });
+  } catch (err) {
+    console.error("join-request notification insert failed", err);
+  }
+  return { id: requestId };
+}
+
+export async function listJoinFamilyRequests(familyId: string): Promise<JoinFamilyRequestRow[]> {
+  const rows = await JoinFamilyRequestModel.find({
+    targetFamilyId: familyId,
+    status: "pending"
+  })
+    .sort({ createdAt: -1 })
+    .limit(100);
+  return rows.map((r) => ({
+    id: r._id.toString(),
+    targetFamilyId: r.targetFamilyId,
+    email: r.email,
+    name: r.name,
+    status: r.status as JoinFamilyRequestRow["status"],
+    createdAt: r.createdAt.toISOString()
+  }));
+}
+
+export async function approveJoinFamilyRequest(
+  familyId: string,
+  requestId: string,
+  headUserId: string,
+  role: UserRole = "viewer"
+): Promise<{
+  id: string;
+  familyId: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  workspaceRole: WorkspaceRole;
+  familyRole: FamilyRole;
+}> {
+  const reqRow = await JoinFamilyRequestModel.findOne({
+    _id: requestId,
+    targetFamilyId: familyId,
+    status: "pending"
+  });
+  if (!reqRow) throw new Error("REQUEST_NOT_FOUND");
+  const exists = await UserModel.findOne({ email: reqRow.email });
+  if (exists) {
+    const rid = reqRow._id.toString();
+    await JoinFamilyRequestModel.deleteOne({ _id: reqRow._id });
+    await NotificationModel.updateMany(
+      { familyId, insightId: `join_request:${rid}` },
+      { $set: { isRead: true } }
+    ).catch(() => {});
+    throw new Error("EMAIL_EXISTS");
+  }
+  const user = await UserModel.create({
+    email: reqRow.email,
+    name: reqRow.name,
+    familyId,
+    role,
+    familyRole: "MEMBER",
+    workspaceRole: "member",
+    passwordHash: reqRow.passwordHash
+  });
+  await ensurePersonalHealthMember(user._id.toString(), familyId, reqRow.name);
+  await JoinFamilyRequestModel.updateOne(
+    { _id: requestId },
+    {
+      $set: { status: "approved", resolvedByUserId: headUserId, resolvedAt: new Date() },
+      $unset: { passwordHash: 1 }
+    }
+  );
+  await NotificationModel.updateMany(
+    { familyId, insightId: `join_request:${requestId}` },
+    { $set: { isRead: true } }
+  ).catch(() => {});
+  return {
+    id: user._id.toString(),
+    familyId,
+    email: user.email,
+    name: user.name,
+    role: user.role as UserRole,
+    workspaceRole: "member",
+    familyRole: "MEMBER"
+  };
+}
+
+export async function rejectJoinFamilyRequest(
+  familyId: string,
+  requestId: string,
+  headUserId: string
+): Promise<void> {
+  const r = await JoinFamilyRequestModel.findOneAndUpdate(
+    { _id: requestId, targetFamilyId: familyId, status: "pending" },
+    {
+      $set: { status: "rejected", resolvedByUserId: headUserId, resolvedAt: new Date() },
+      $unset: { passwordHash: 1 }
+    },
+    { new: true }
+  );
+  if (!r) throw new Error("REQUEST_NOT_FOUND");
+  await NotificationModel.updateMany(
+    { familyId, insightId: `join_request:${requestId}` },
+    { $set: { isRead: true } }
+  ).catch(() => {});
+}
+
+export async function createMemberLogAccessRequest(params: {
+  familyId: string;
+  requesterUserId: string;
+  targetMemberId: string;
+  requestedPermission: LogAccessPermissionLevel;
+}): Promise<{ id: string }> {
+  const member = await FamilyMemberModel.findOne({ _id: params.targetMemberId, familyId: params.familyId });
+  if (!member) throw new Error("MEMBER_NOT_FOUND");
+  const dup = await MemberLogAccessRequestModel.findOne({
+    familyId: params.familyId,
+    requesterUserId: params.requesterUserId,
+    targetMemberId: params.targetMemberId,
+    status: "pending"
+  });
+  if (dup) throw new Error("REQUEST_PENDING");
+  const row = await MemberLogAccessRequestModel.create({
+    familyId: params.familyId,
+    requesterUserId: params.requesterUserId,
+    targetMemberId: params.targetMemberId,
+    requestedPermission: params.requestedPermission,
+    status: "pending"
+  });
+  return { id: row._id.toString() };
+}
+
+export async function listMemberLogAccessRequests(familyId: string): Promise<MemberLogAccessRequestRow[]> {
+  const rows = await MemberLogAccessRequestModel.find({ familyId, status: "pending" })
+    .sort({ createdAt: -1 })
+    .limit(100);
+  return rows.map((r) => ({
+    id: r._id.toString(),
+    familyId: r.familyId,
+    requesterUserId: r.requesterUserId,
+    targetMemberId: r.targetMemberId,
+    requestedPermission: r.requestedPermission as LogAccessPermissionLevel,
+    status: r.status as MemberLogAccessRequestRow["status"],
+    createdAt: r.createdAt.toISOString()
+  }));
+}
+
+export async function approveMemberLogAccessRequest(
+  familyId: string,
+  requestId: string,
+  headUserId: string
+): Promise<LogAccessGrantRow> {
+  const reqRow = await MemberLogAccessRequestModel.findOne({
+    _id: requestId,
+    familyId,
+    status: "pending"
+  });
+  if (!reqRow) throw new Error("REQUEST_NOT_FOUND");
+  await LogAccessGrantModel.updateMany(
+    {
+      familyId,
+      granteeUserId: reqRow.requesterUserId,
+      memberProfileId: reqRow.targetMemberId,
+      active: true
+    },
+    { $set: { active: false } }
+  );
+  const grant = await LogAccessGrantModel.create({
+    familyId,
+    granteeUserId: reqRow.requesterUserId,
+    memberProfileId: reqRow.targetMemberId,
+    permission: reqRow.requestedPermission,
+    grantedByUserId: headUserId,
+    active: true
+  });
+  await MemberLogAccessRequestModel.updateOne(
+    { _id: requestId },
+    { $set: { status: "approved", resolvedByUserId: headUserId, resolvedAt: new Date() } }
+  );
+  return {
+    id: grant._id.toString(),
+    familyId: grant.familyId,
+    granteeUserId: grant.granteeUserId,
+    memberProfileId: grant.memberProfileId,
+    permission: grant.permission as LogAccessPermissionLevel,
+    grantedByUserId: grant.grantedByUserId,
+    active: grant.active,
+    createdAt: grant.createdAt.toISOString()
+  };
+}
+
+export async function rejectMemberLogAccessRequest(
+  familyId: string,
+  requestId: string,
+  headUserId: string
+): Promise<void> {
+  const r = await MemberLogAccessRequestModel.findOneAndUpdate(
+    { _id: requestId, familyId, status: "pending" },
+    { $set: { status: "rejected", resolvedByUserId: headUserId, resolvedAt: new Date() } },
+    { new: true }
+  );
+  if (!r) throw new Error("REQUEST_NOT_FOUND");
+}
+
+export async function listLogAccessGrantsForUser(
+  familyId: string,
+  granteeUserId: string
+): Promise<LogAccessGrantRow[]> {
+  const rows = await LogAccessGrantModel.find({ familyId, granteeUserId, active: true });
+  return rows.map((g) => ({
+    id: g._id.toString(),
+    familyId: g.familyId,
+    granteeUserId: g.granteeUserId,
+    memberProfileId: g.memberProfileId,
+    permission: g.permission as LogAccessPermissionLevel,
+    grantedByUserId: g.grantedByUserId,
+    active: g.active,
+    createdAt: g.createdAt.toISOString()
+  }));
+}
+
+export async function getLogByIdForViewer(
+  familyId: string,
+  logId: string,
+  ctx: ViewerContext
+): Promise<HealthLog | null> {
+  const log = await getLogById(familyId, logId);
+  if (!log) return null;
+  const visible = await listLogsForViewer(familyId, ctx, log.memberId);
+  return visible.some((l) => l.id === logId) ? log : null;
+}
+
+export async function migrateEnsurePersonalHealthMembers(): Promise<void> {
+  const users = await UserModel.find({ familyId: { $exists: true, $nin: [null, ""] } });
+  for (const u of users) {
+    try {
+      await ensurePersonalHealthMember(u._id.toString(), String(u.familyId), u.name);
+    } catch (e) {
+      console.error("migrateEnsurePersonalHealthMembers user failed", u._id, e);
+    }
+  }
+}
+
+/** Backfill `familyRole` for legacy users; ensure each family still has at least one HEAD. */
+export async function migrateUsersToFamilyRoles(): Promise<void> {
+  const users = await UserModel.find({
+    familyId: { $exists: true, $nin: [null, ""] }
+  });
+  for (const u of users) {
+    if (!u.familyRole) {
+      u.familyRole = deriveFamilyRoleFromLegacy(u.role, u.workspaceRole);
+      await u.save();
+    }
+  }
+  const familyIds = await UserModel.distinct("familyId", { familyId: { $nin: [null, ""] } });
+  for (const fid of familyIds) {
+    if (!fid) continue;
+    const headCount = await UserModel.countDocuments({ familyId: fid, familyRole: "HEAD" });
+    if (headCount === 0) {
+      const first = await UserModel.findOne({ familyId: fid }).sort({ createdAt: 1 });
+      if (first) {
+        first.familyRole = "HEAD";
+        first.workspaceRole = "head";
+        first.role = "owner";
+        await first.save();
+      }
+    }
+  }
+}
+
+export async function updateUserProfile(
+  userId: string,
+  patch: { name?: string; description?: string | null; profilePictureUrl?: string | null }
+): Promise<Awaited<ReturnType<typeof mapUserToAuthProfile>>> {
+  const u = await UserModel.findById(userId);
+  if (!u) throw new Error("USER_NOT_FOUND");
+  if (patch.name !== undefined) u.name = patch.name.trim().slice(0, 120);
+  if (patch.description !== undefined) u.description = patch.description?.trim().slice(0, 2000) || undefined;
+  if (patch.profilePictureUrl !== undefined) u.profilePictureUrl = patch.profilePictureUrl || undefined;
+  await u.save();
+  return mapUserToAuthProfile(u);
+}
+
+/** Remove user from their family (session must be refreshed). Fails if sole HEAD. */
+export async function leaveFamily(userId: string): Promise<void> {
+  const u = await UserModel.findById(userId);
+  if (!u?.familyId) throw new Error("NO_FAMILY");
+  const fr = (u.familyRole as FamilyRole) || deriveFamilyRoleFromLegacy(u.role, u.workspaceRole);
+  if (fr === "HEAD") {
+    const others = await UserModel.countDocuments({
+      familyId: u.familyId,
+      familyRole: "HEAD",
+      _id: { $ne: userId }
+    });
+    if (others < 1) throw new Error("LAST_HEAD");
+  }
+  const fid = String(u.familyId);
+  const selfMembers = await FamilyMemberModel.find({ familyId: fid, linkedUserId: userId }).select("_id").lean();
+  const selfIds = selfMembers.map((m) => String(m._id));
+  if (selfIds.length) {
+    await HealthLogModel.deleteMany({ familyId: fid, memberId: { $in: selfIds } });
+    await FamilyMemberModel.deleteMany({ familyId: fid, linkedUserId: userId });
+  }
+  await UserModel.findByIdAndUpdate(userId, {
+    $unset: { familyId: 1, familyRole: 1, workspaceRole: 1 },
+    $set: { role: "viewer" }
+  });
 }

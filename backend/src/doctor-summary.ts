@@ -1,7 +1,33 @@
 import type { HealthLog, Insight } from "./types.js";
 import type { TimelineNarrativeEvent } from "./timeline-narrative.js";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+export const DOCTOR_SUMMARY_DAY_MS = 24 * 60 * 60 * 1000;
+const DAY_MS = DOCTOR_SUMMARY_DAY_MS;
+
+export function partitionLogsByOccurrenceWindow(
+  logs: HealthLog[],
+  days: number,
+  now: Date = new Date()
+): {
+  currentLogs: HealthLog[];
+  previousLogs: HealthLog[];
+  rangeStart: Date;
+  rangeEnd: Date;
+} {
+  const cutoffMs = now.getTime() - days * DAY_MS;
+  const previousCutoffMs = now.getTime() - days * 2 * DAY_MS;
+  const currentLogs = logs.filter((l) => new Date(l.occurredAt).getTime() >= cutoffMs);
+  const previousLogs = logs.filter((l) => {
+    const ts = new Date(l.occurredAt).getTime();
+    return ts >= previousCutoffMs && ts < cutoffMs;
+  });
+  return {
+    currentLogs,
+    previousLogs,
+    rangeStart: new Date(cutoffMs),
+    rangeEnd: now
+  };
+}
 const MEDICATION_KEYWORDS = ["medication", "medicine", "tablet", "pill", "dose", "antibiotic", "painkiller"];
 
 type SymptomTrend = {
@@ -41,13 +67,8 @@ export function buildDoctorVisitSummary(input: {
 } {
   const days = input.days || 30;
   const now = input.now || new Date();
-  const cutoffMs = now.getTime() - days * DAY_MS;
-  const previousCutoffMs = now.getTime() - days * 2 * DAY_MS;
-  const currentLogs = input.logs.filter((l) => new Date(l.occurredAt).getTime() >= cutoffMs);
-  const previousLogs = input.logs.filter((l) => {
-    const ts = new Date(l.occurredAt).getTime();
-    return ts >= previousCutoffMs && ts < cutoffMs;
-  });
+  const { currentLogs, previousLogs, rangeStart } = partitionLogsByOccurrenceWindow(input.logs, days, now);
+  const cutoffMs = rangeStart.getTime();
 
   const symptomCount = new Map<string, number>();
   const prevSymptomCount = new Map<string, number>();
@@ -118,7 +139,7 @@ export function buildDoctorVisitSummary(input: {
       : `${input.memberName}'s last ${days} days show recurring ${recurringSymptoms[0].symptom} patterns, with ${topTrend?.trend || "stable"} overall trend activity compared with the previous period.`;
 
   return {
-    title: `Doctor Visit Summary: ${input.memberName}`,
+    title: `Observation handoff — ${input.memberName}`,
     periodLabel: `Last ${days} days`,
     generatedAt: now.toISOString(),
     recurringSymptoms,
