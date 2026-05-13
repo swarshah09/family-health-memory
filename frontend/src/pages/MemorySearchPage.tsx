@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toastFromCaughtError } from "@/lib/toast-errors";
+import { useAppHub } from "@/lib/hub-outlet";
+import { CopyHint } from "@/components/CopyHint";
+import { MEMORY_SEARCH_DISCLAIMER } from "@/lib/disclaimer-copy";
 
 type ChatMessage =
   | { role: "user"; content: string }
@@ -21,6 +24,7 @@ const SUGGESTED = [
 export default function MemorySearchPage() {
   const navigate = useNavigate();
   const { user, members, memorySearch } = useApp();
+  const inInsightsHub = useAppHub()?.hub === "insights";
   const [memberFilter, setMemberFilter] = useState<string>("all");
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -81,23 +85,23 @@ export default function MemorySearchPage() {
 
   return (
     <div className="app-shell app-safe-bottom flex flex-col min-h-[100dvh]">
-      <div className="bg-card border-b border-border/40 px-5 pt-12 pb-5 shrink-0">
+      <div className={`bg-card border-b border-border/40 px-5 pb-5 shrink-0 ${inInsightsHub ? "pt-4" : "pt-12"}`}>
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => navigate("/")}
-            className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <div className="h-9 w-9 rounded-xl bg-insight/15 flex items-center justify-center">
-            <MessageCircle className="h-4 w-4 text-insight" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <h1 className="font-display font-bold text-foreground text-lg">Ask your health memory</h1>
-            <p className="text-[11px] text-muted-foreground">
-              Natural-language search over your family logs — observational, not medical advice.
-            </p>
+          {!inInsightsHub && (
+            <button
+              type="button"
+              onClick={() => navigate("/")}
+              className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+          )}
+          <div className="flex flex-1 min-w-0 items-center gap-2">
+            <div className="h-9 w-9 rounded-xl bg-insight/15 flex items-center justify-center shrink-0">
+              <MessageCircle className="h-4 w-4 text-insight" />
+            </div>
+            <h1 className="font-display font-bold text-foreground text-lg">Ask your memory</h1>
+            <CopyHint label="About this search" content={MEMORY_SEARCH_DISCLAIMER} />
           </div>
         </div>
         <div className="mt-4 flex flex-col sm:flex-row gap-2 sm:items-center">
@@ -242,7 +246,7 @@ export default function MemorySearchPage() {
         </form>
         {user?.role === "viewer" ? (
           <p className="text-[10px] text-center text-muted-foreground mt-2 max-w-xl mx-auto">
-            Viewer access: you can search and read answers; only contributors add new logs.
+            View-only access: you can search and read answers; contributors add new notes.
           </p>
         ) : null}
       </div>

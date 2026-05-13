@@ -25,7 +25,7 @@ export function displayRoleLabel(role: ApiFamilyRole | FamilyPermissionRole | st
     case "caregiver":
       return "Contributor";
     case "viewer":
-      return "Viewer";
+      return "View only";
     default:
       return String(role);
   }
@@ -85,20 +85,48 @@ export function formatActivityAction(action: string): string {
     "auth.login": "Signed in",
     "auth.signup": "Created account",
     "auth.invitation.accept": "Accepted invitation",
-    "log.create.text": "Added text log",
-    "log.create.voice": "Added voice log",
-    "log.update": "Updated log",
-    "log.delete": "Deleted log",
-    "member.create": "Added family member",
-    "member.update": "Updated member profile",
-    "member.delete": "Removed member",
-    "user.invite": "Updated team member",
-    "user.invite.pending": "Sent invitation",
-    "user.role.change": "Changed role",
-    "user.family_role.update": "Changed workspace role",
-    "family.join_request.approved": "Approved join request",
-    "family.join_request.rejected": "Declined join request",
-    "memory.search": "Asked health memory"
+    "log.create.text": "Added a text note",
+    "log.create.voice": "Added a voice note",
+    "log.update": "Updated a note",
+    "log.delete": "Removed a note",
+    "member.create": "Added someone to the family list",
+    "member.update": "Updated a profile",
+    "member.delete": "Removed someone from the family list",
+    "user.invite": "Updated a team member",
+    "user.invite.pending": "Sent an invitation",
+    "user.role.change": "Changed a role",
+    "user.role.update": "Changed a team role",
+    "user.family_role.update": "Changed how someone participates",
+    "family.join_request.approved": "Approved a request to join",
+    "family.join_request.rejected": "Declined a request to join",
+    "memory.search": "Searched family notes",
+    "insight.fetch.precomputed": "Opened patterns",
+    "care_guidance.fetch": "Opened care suggestions",
+    "digest.generate.manual": "Created a weekly summary",
+    "chat.log.api.ingest": "Saved a shared message as a note",
+    "automation.run.manual": "Ran a reminder check",
+    "automation.settings.update": "Updated reminder settings",
+    "chat.ingest": "Submitted a shared message",
+    "chat.ingest.resolve": "Linked a message to someone",
+    "chat.ingest.dismiss": "Dismissed a message from review",
+    "member_access.requested": "Asked to help with someone’s care",
+    "member_access.approved": "Approved help for a family member",
+    "member_access.rejected": "Declined help for a family member"
   };
-  return map[action] || action.replace(/\./g, " ");
+  return map[action] || "Activity in the app";
+}
+
+/** Short label for audit / activity target types (avoid raw backend names in UI). */
+export function formatActivityTargetType(targetType: string): string {
+  const map: Record<string, string> = {
+    member: "Family member",
+    log: "Health note",
+    user: "Team member",
+    care_guidance: "Care suggestions",
+    family: "Family",
+    invitation: "Invitation",
+    join_request: "Join request",
+    notification: "Reminder"
+  };
+  return map[targetType] || "Record";
 }

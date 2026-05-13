@@ -7,8 +7,6 @@ import {
   Users,
   Crown,
   UserCircle,
-  CheckCircle2,
-  Circle,
   ClipboardList,
   Link2
 } from "lucide-react";
@@ -16,11 +14,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { toastError, toastFromCaughtError } from "@/lib/toast-errors";
 import { displayRoleLabel, formatActivityAction, isHeadUser } from "@/lib/collaboration-roles";
+import { useAppHub } from "@/lib/hub-outlet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 export default function TeamPage() {
   const navigate = useNavigate();
+  const inFamilyHub = useAppHub()?.hub === "family";
   const {
     user,
     familyUsers,
@@ -50,13 +50,10 @@ export default function TeamPage() {
 
   const canManageWorkspace = isHeadUser(user);
   const canInvite = canManageWorkspace;
-  const hasAnyTeamMembers = familyUsers.length > 0;
-  const headCount = familyUsers.filter((u) => u.familyRole === "HEAD" || u.role === "owner").length;
-  const memberCount = familyUsers.filter((u) => u.familyRole === "MEMBER" || (!u.familyRole && u.role !== "owner")).length;
 
   const applyFamilyRole = (memberId: string, memberName: string, next: "HEAD" | "MEMBER") => {
     setFamilyUserRole(memberId, next)
-      .then(() => toast.success(`Workspace role updated for ${memberName}`))
+      .then(() => toast.success(`Family role updated for ${memberName}`))
       .catch((err: unknown) =>
         toastFromCaughtError(
           err,
@@ -70,20 +67,21 @@ export default function TeamPage() {
 
   return (
     <div className="app-shell app-safe-bottom">
-      <div className="bg-card border-b border-border/40 px-5 pt-12 pb-6">
+      <div className={`bg-card border-b border-border/40 px-5 pb-6 ${inFamilyHub ? "pt-4" : "pt-12"}`}>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate("/")}
-            className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
+          {!inFamilyHub && (
+            <button
+              onClick={() => navigate("/")}
+              className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+          )}
           <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center">
             <Users className="h-4 w-4 text-primary" />
           </div>
           <div>
-            <h1 className="font-display font-bold text-foreground text-lg">Family Team</h1>
-            <p className="text-[11px] text-muted-foreground">Workspace roles, invitations, and activity</p>
+            <h1 className="font-display font-bold text-foreground text-lg">Care team</h1>
           </div>
         </div>
       </div>
@@ -91,92 +89,23 @@ export default function TeamPage() {
       <div className="px-5 py-5 space-y-3">
         <details className="glass-card rounded-2xl p-4 border border-border/40 group">
           <summary className="list-none cursor-pointer flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-foreground">Quick start</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                {[hasAnyTeamMembers, headCount >= 1, memberCount >= 1 || headCount >= 2].filter(Boolean).length}/3
-                complete — tap to expand
-              </p>
-            </div>
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground group-open:hidden">Expand</span>
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground hidden group-open:inline">Collapse</span>
+            <p className="text-sm font-semibold text-foreground">How roles work</p>
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground group-open:hidden">Show</span>
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground hidden group-open:inline">Hide</span>
           </summary>
-          <div className="mt-3 space-y-3 border-t border-border/30 pt-3">
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Your health data stays inside this private family workspace. Heads approve join requests and manage
-              workspace roles; every member can view family timelines but only edit their own logs unless they are a
-              Head.
+          <div className="mt-3 space-y-2 border-t border-border/30 pt-3 text-[11px] text-muted-foreground leading-relaxed">
+            <p>
+              <span className="font-medium text-foreground">Head</span> — invites, approvals, workspace settings.
             </p>
-            <div className="space-y-2">
-              {[
-                {
-                  done: hasAnyTeamMembers,
-                  title: "Confirm who is in your workspace",
-                  desc: "Everyone listed here shares this family space under strict isolation."
-                },
-                {
-                  done: headCount >= 1,
-                  title: "Keep at least one Head",
-                  desc: "Heads can promote others, approve joins, and edit any log when needed."
-                },
-                {
-                  done: memberCount >= 1 || headCount >= 2,
-                  title: "Grow the team safely",
-                  desc: "Invite contributors by email, or share your family ID for a join request flow."
-                }
-              ].map((step) => (
-                <div key={step.title} className="rounded-xl border border-border/40 bg-muted/30 p-3">
-                  <div className="flex items-start gap-2">
-                    {step.done ? (
-                      <CheckCircle2 className="h-4 w-4 text-success mt-0.5 shrink-0" />
-                    ) : (
-                      <Circle className="h-4 w-4 text-muted-foreground/70 mt-0.5 shrink-0" />
-                    )}
-                    <div>
-                      <p className={`text-xs font-medium ${step.done ? "text-success" : "text-foreground"}`}>{step.title}</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{step.desc}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </details>
-
-        <details className="glass-card rounded-2xl p-4 border border-border/40 group">
-          <summary className="list-none cursor-pointer flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-foreground">Head vs member</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Show guide</p>
-            </div>
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground group-open:hidden">Expand</span>
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground hidden group-open:inline">Collapse</span>
-          </summary>
-          <div className="mt-3 space-y-2.5 border-t border-border/30 pt-3">
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              This is a private care workspace, not a social feed. Use the lowest privilege that fits, then promote
-              only when someone needs to govern the space.
+            <p>
+              <span className="font-medium text-foreground">Member</span> — family timelines; edits own logs unless given more access.
             </p>
-            <div className="space-y-1.5 text-[11px] text-foreground/85">
-              <p>
-                <span className="font-semibold text-foreground">Head:</span> approves join requests, changes workspace
-                roles (with at least one Head always remaining), manages family settings, and may edit any health log.
-              </p>
-              <p>
-                <span className="font-semibold text-foreground">Member:</span>{" "}
-                {`can read all family members' logs and create or edit only their own logs.`}
-              </p>
-            </div>
           </div>
         </details>
 
         {canInvite && (
           <div className="glass-card rounded-2xl p-4 border border-border/40 space-y-3">
             <p className="section-title">Invite by email</p>
-            <p className="text-[11px] text-muted-foreground">
-              Invited people join as workspace members. Their legacy access label (contributor vs read-only) is used
-              for compatibility with older tools.
-            </p>
             <div className="grid grid-cols-1 gap-2.5">
               <Input
                 value={inviteName}
@@ -197,7 +126,7 @@ export default function TeamPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="caregiver">Contributor (legacy)</SelectItem>
-                  <SelectItem value="viewer">Viewer (legacy)</SelectItem>
+                  <SelectItem value="viewer">View only</SelectItem>
                 </SelectContent>
               </Select>
               <Button
@@ -299,7 +228,7 @@ export default function TeamPage() {
                   <p className="text-[10px] text-muted-foreground mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
                     <span className="inline-flex items-center gap-0.5">
                       <Shield className="inline h-3 w-3 opacity-70" />
-                      Workspace: {displayRoleLabel(workspaceRole)}
+                      Family role: {displayRoleLabel(workspaceRole)}
                     </span>
                     <span className="inline-flex items-center gap-0.5">
                       <Link2 className="inline h-3 w-3 opacity-70" />

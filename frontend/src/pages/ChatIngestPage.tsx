@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { toastError, toastFromCaughtError, toastFromFailedResponse } from "@/lib/toast-errors";
+import { useAppHub } from "@/lib/hub-outlet";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -41,6 +42,7 @@ function hintMemberId(
 
 export default function ChatIngestPage() {
   const navigate = useNavigate();
+  const inYouHub = useAppHub()?.hub === "you";
   const { user, members, refreshFamilyData } = useApp();
   const [senderName, setSenderName] = useState("Family Member");
   const [message, setMessage] = useState("");
@@ -202,27 +204,29 @@ export default function ChatIngestPage() {
 
   return (
     <div className="app-shell app-safe-bottom">
-      <div className="bg-card border-b border-border/40 px-5 pt-12 pb-6">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate("/automation")}
-            className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center">
-            <MessageSquareText className="h-4 w-4 text-primary" />
-          </div>
-          <div>
-            <h1 className="font-display font-bold text-foreground text-lg">Shared messages</h1>
-            <p className="text-[11px] text-muted-foreground">
-              Add notes from relatives; unmatched messages go to the review queue.
-            </p>
+      {!inYouHub && (
+        <div className="bg-card border-b border-border/40 px-5 pt-12 pb-6">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate("/you/automation")}
+              className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center">
+              <MessageSquareText className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <h1 className="font-display font-bold text-foreground text-lg">Shared messages</h1>
+              <p className="text-[11px] text-muted-foreground">
+                Add notes from relatives; unmatched messages go to the review queue.
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      <div className="px-5 py-5 space-y-4">
+      <div className={inYouHub ? "space-y-4 px-5 py-4" : "space-y-4 px-5 py-5"}>
         <div className="glass-card rounded-2xl p-4 space-y-3">
           <Input
             value={senderName}
@@ -242,7 +246,7 @@ export default function ChatIngestPage() {
           </Button>
           {!canResolve && (
             <p className="text-xs text-muted-foreground">
-              Viewers cannot submit or assign messages.
+              View-only members cannot submit or assign messages.
             </p>
           )}
         </div>
@@ -250,7 +254,7 @@ export default function ChatIngestPage() {
         <div className="glass-card rounded-2xl p-4 space-y-3">
           <div className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-xl bg-amber-500/10 flex items-center justify-center">
-              <ClipboardList className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+              <ClipboardList className="h-4 w-4 text-warning" />
             </div>
             <div>
               <p className="text-sm font-semibold text-foreground">Review queue</p>
@@ -324,7 +328,7 @@ export default function ChatIngestPage() {
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground pt-1">
-                    Only owners and caregivers can assign these messages.
+                    Only organizers and contributors can assign these messages.
                   </p>
                 )}
               </div>

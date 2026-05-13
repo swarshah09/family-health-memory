@@ -6,6 +6,7 @@ import { Heart, ArrowRight, Sparkles, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AppRequestError, toastError, toastFromCaughtError } from "@/lib/toast-errors";
 import { toast } from "sonner";
+import { ThemeAppearanceControl } from "@/components/ThemeAppearanceControl";
 
 export default function AuthPage() {
   const { login, signup, requestFamilyMembership } = useApp();
@@ -27,7 +28,7 @@ export default function AuthPage() {
       if (mode === "login") await login(email, password);
       else if (signupFlow === "join") {
         if (!joinFamilyId.trim()) {
-          toastError("Family ID needed", "Paste the workspace ID your family organizer shared with you.");
+          toastError("Family code needed", "Ask your organizer for the invite code they use when someone joins.");
           return;
         }
         const { message } = await requestFamilyMembership({
@@ -57,7 +58,10 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-6 bg-[#0d3a34] relative overflow-hidden">
+    <div className="min-h-dvh flex flex-col items-center justify-center px-4 py-8 sm:px-6 md:px-8 lg:min-h-screen lg:py-12 bg-background mesh-bg relative overflow-hidden">
+      <div className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-20 hidden sm:block">
+        <ThemeAppearanceControl />
+      </div>
       {/* Decorative organic circles */}
       {[
         { size: 300, x: "-10%", y: "-8%", delay: 0 },
@@ -84,7 +88,7 @@ export default function AuthPage() {
       ))}
 
       <motion.div
-        className="w-full max-w-sm relative z-10"
+        className="w-full max-w-sm md:max-w-md lg:max-w-lg relative z-10 xl:max-w-xl"
         initial={{ opacity: 0, y: 40 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
@@ -98,7 +102,7 @@ export default function AuthPage() {
         >
           <div className="relative mb-5">
             <motion.div
-              className="h-20 w-20 rounded-3xl bg-[#37c4aa] flex items-center justify-center shadow-glow-lg"
+              className="h-20 w-20 rounded-3xl bg-primary flex items-center justify-center shadow-soft-lg"
               animate={{ rotate: [0, 2, -2, 0] }}
               transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
             >
@@ -113,15 +117,15 @@ export default function AuthPage() {
               <Sparkles className="h-3.5 w-3.5 text-accent-foreground" />
             </motion.div>
           </div>
-          <h1 className="text-3xl font-display font-bold text-white">Family Health Memory</h1>
-          <p className="text-white/65 text-sm mt-1.5 font-medium tracking-[0.16em] uppercase">
+          <h1 className="text-3xl font-display font-bold text-foreground">Family Health Memory</h1>
+          <p className="text-muted-foreground text-sm mt-1.5 font-medium tracking-[0.16em] uppercase">
             Private family workspace — invite only, not a social network
           </p>
         </motion.div>
 
         {/* Form card */}
         <motion.div
-          className="bg-card rounded-[1.75rem] p-6 shadow-2xl"
+          className="bg-card rounded-[1.75rem] p-6 shadow-soft-lg ring-1 ring-border/40 md:p-8 lg:rounded-[2rem] lg:p-10"
           initial={{ opacity: 0, y: 36 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.25, duration: 0.5 }}
@@ -174,7 +178,7 @@ export default function AuthPage() {
                     />
                   ) : (
                     <Input
-                      placeholder="Family workspace ID (from your organizer)"
+                      placeholder="Family invite code (from your organizer)"
                       value={joinFamilyId}
                       onChange={(e) => setJoinFamilyId(e.target.value)}
                       required={signupFlow === "join"}
@@ -264,7 +268,7 @@ export default function AuthPage() {
           {["Track", "Detect", "Secure"].map((item, i) => (
             <motion.div
               key={item}
-              className="rounded-xl bg-white/90 px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-[#146459]"
+              className="rounded-xl border border-border/60 bg-card/80 px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-primary"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.55 + i * 0.12, duration: 0.35 }}
@@ -274,7 +278,7 @@ export default function AuthPage() {
           ))}
         </div>
 
-        <p className="text-center text-[11px] text-white/55 mt-8">
+        <p className="text-center text-[11px] text-muted-foreground mt-8">
           Observation support only - not medical diagnosis
         </p>
       </motion.div>

@@ -16,6 +16,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { toastError, toastFromCaughtError, toastFromFailedResponse } from "@/lib/toast-errors";
+import { useAppHub } from "@/lib/hub-outlet";
+import { formatActivityAction, formatActivityTargetType } from "@/lib/collaboration-roles";
+import { gentleReminderImportance } from "@/lib/reminder-copy";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -42,26 +45,6 @@ type NotificationItem = {
   createdAt: string;
 };
 
-type AIObservabilitySummary = {
-  lookbackDays: number;
-  totalEvents: number;
-  failures: number;
-  retryEvents: number;
-  insightSuccessRate: number;
-  extractionFailures: number;
-  trend: Array<{
-    date: string;
-    successes: number;
-    failures: number;
-    retries: number;
-  }>;
-  recentFailures: Array<{
-    stage: "extractor" | "trend" | "insight";
-    errorMessage: string | null;
-    timestamp: string;
-  }>;
-};
-
 type ReengagementPrompt = {
   id: string;
   memberId: string;
@@ -74,6 +57,7 @@ type ReengagementPrompt = {
 
 export default function AdminPage() {
   const navigate = useNavigate();
+  const inYouHub = useAppHub()?.hub === "you";
   const {
     user,
     members,
@@ -106,9 +90,6 @@ export default function AdminPage() {
     notificationsEnabled: boolean;
   } | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [observability, setObservability] = useState<AIObservabilitySummary | null>(null);
-  const [observabilityDays, setObservabilityDays] = useState("7");
-  const [observabilityLoading, setObservabilityLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "team" | "members" | "alerts" | "audit">("overview");
   const [teamQuery, setTeamQuery] = useState("");
   const [memberQuery, setMemberQuery] = useState("");
@@ -216,35 +197,6 @@ export default function AdminPage() {
     setAuditOffset(Number(json.offset || 0));
   };
 
-  const fetchObservability = async () => {
-    if (!user || !token) return;
-    const days = Number(observabilityDays) || 7;
-    setObservabilityLoading(true);
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/families/${user.familyId}/ai-observability?days=${Math.min(
-          Math.max(days, 1),
-          90
-        )}`,
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
-      if (!response.ok) {
-        await toastFromFailedResponse(
-          response,
-          "AI observability unavailable",
-          "We could not load pipeline metrics for the selected period."
-        );
-        return;
-      }
-      const json = (await response.json()) as AIObservabilitySummary;
-      setObservability(json);
-    } finally {
-      setObservabilityLoading(false);
-    }
-  };
-
   const exportCsv = (filename: string, rows: Array<Record<string, unknown>>) => {
     if (!rows.length) {
       toastError(
@@ -269,7 +221,6 @@ export default function AdminPage() {
     if (!user) return;
     loadFamilyUsers().catch(() => {});
     fetchAutomation().catch(() => {});
-    fetchObservability().catch(() => {});
     fetchReengagementPrompts().catch(() => {});
   }, [user?.familyId]);
 
@@ -280,17 +231,11 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (activeTab !== "overview") return;
-    fetchObservability().catch(() => {});
-  }, [activeTab, observabilityDays]);
-
-  useEffect(() => {
-    if (activeTab !== "overview") return;
     const timer = window.setInterval(() => {
-      fetchObservability().catch(() => {});
       fetchReengagementPrompts().catch(() => {});
     }, 30000);
     return () => window.clearInterval(timer);
-  }, [activeTab, observabilityDays, user?.familyId]);
+  }, [activeTab, user?.familyId]);
 
   if (user?.role !== "owner") {
     return (
@@ -320,20 +265,20 @@ export default function AdminPage() {
       if (!response.ok) {
         await toastFromFailedResponse(
           response,
-          "Automation run failed",
-          "We could not start a full analysis run from the admin console."
+          "Reminder check didn’t start",
+          "We couldn’t run a fresh reminder check from here. Try again in a moment."
         );
         return;
       }
     } catch (err: unknown) {
       toastFromCaughtError(
         err,
-        "Automation run failed",
-        "We could not reach the server to start an analysis run."
+        "Reminder check didn’t start",
+        "We couldn’t reach the server to run a reminder check."
       );
       return;
     }
-    toast.success("Automation run completed");
+    toast.success("Reminder check finished");
     await refreshFamilyData();
     await fetchAutomation();
   };
@@ -349,20 +294,20 @@ export default function AdminPage() {
       if (!response.ok) {
         await toastFromFailedResponse(
           response,
-          "Threshold settings not saved",
-          "We could not persist automation thresholds. Review values and try again."
+          "Settings not saved",
+          "We couldn’t save these reminder options. Check the numbers and try again."
         );
         return;
       }
     } catch (err: unknown) {
       toastFromCaughtError(
         err,
-        "Threshold settings not saved",
-        "We could not reach the server to update automation thresholds."
+        "Settings not saved",
+        "We couldn’t reach the server to update reminder options."
       );
       return;
     }
-    toast.success("Threshold settings updated");
+    toast.success("Reminder settings saved");
     await fetchAutomation();
   };
 
@@ -398,7 +343,10 @@ export default function AdminPage() {
   const filteredNotifications = useMemo(() => {
     const q = alertQuery.trim().toLowerCase();
     if (!q) return notifications;
-    return notifications.filter((n) => n.message.toLowerCase().includes(q) || n.severity.includes(q));
+    return notifications.filter((n) => {
+      const label = gentleReminderImportance(n.severity).toLowerCase();
+      return n.message.toLowerCase().includes(q) || label.includes(q);
+    });
   }, [notifications, alertQuery]);
 
   const confirmRoleChange = () => {
@@ -445,50 +393,44 @@ export default function AdminPage() {
       .finally(() => setDeletingMember(false));
   };
 
-  const maxDailyEvents = useMemo(() => {
-    if (!observability?.trend?.length) return 1;
-    return Math.max(
-      1,
-      ...observability.trend.map((point) => point.successes + point.failures)
-    );
-  }, [observability]);
-
   return (
-    <div className="app-shell app-safe-bottom bg-[#151412] text-white">
-      <div className="bg-[#1d1a18] border-b border-white/10 px-5 pt-12 pb-6">
+    <div className="app-shell app-safe-bottom bg-background text-foreground">
+      <div className={`border-b border-border/50 bg-card/50 px-5 pb-6 backdrop-blur-sm ${inYouHub ? "pt-4" : "pt-12"}`}>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate("/")}
-            className="text-white/60 hover:text-white p-2 rounded-xl hover:bg-white/10 transition-colors"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
+          {!inYouHub && (
+            <button
+              onClick={() => navigate("/")}
+              className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+          )}
           <div className="h-8 w-8 rounded-xl bg-warning/20 flex items-center justify-center">
             <Crown className="h-4 w-4 text-warning" />
           </div>
           <div>
-            <h1 className="font-display font-bold text-white text-lg">Admin Console</h1>
-            <p className="text-[11px] text-white/55">Owner controls for family operations</p>
+            <h1 className="font-display font-bold text-foreground text-lg">Admin Console</h1>
+            <p className="text-[11px] text-muted-foreground">Owner controls for family operations</p>
           </div>
         </div>
       </div>
 
       <div className="px-5 py-5 space-y-4">
-        <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-2">
+        <div className="glass-card rounded-2xl p-2">
           <div className="grid grid-cols-5 gap-2">
             {[
               { id: "overview", label: "Overview" },
               { id: "team", label: "Team" },
               { id: "members", label: "Members" },
               { id: "alerts", label: "Alerts" },
-              { id: "audit", label: "Audit" }
+              { id: "audit", label: "History" }
             ].map((tab) => (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id as typeof activeTab)}
                 className={`h-9 rounded-xl text-xs font-medium transition-colors ${
-                  activeTab === tab.id ? "bg-success text-success-foreground" : "bg-black/10 text-white/70"
+                  activeTab === tab.id ? "bg-success text-success-foreground" : "bg-muted/80 text-muted-foreground"
                 }`}
               >
                 {tab.label}
@@ -500,62 +442,40 @@ export default function AdminPage() {
         {activeTab === "overview" && (
           <>
         <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-3">
-            <p className="text-[11px] text-white/55">Members</p>
+          <div className="glass-card rounded-2xl p-3">
+            <p className="text-[11px] text-muted-foreground">Members</p>
             <p className="text-xl font-semibold">{members.length}</p>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-3">
-            <p className="text-[11px] text-white/55">Team users</p>
+          <div className="glass-card rounded-2xl p-3">
+            <p className="text-[11px] text-muted-foreground">Team users</p>
             <p className="text-xl font-semibold">{familyUsers.length}</p>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-3">
-            <p className="text-[11px] text-white/55">Logs</p>
+          <div className="glass-card rounded-2xl p-3">
+            <p className="text-[11px] text-muted-foreground">Logs</p>
             <p className="text-xl font-semibold">{logs.length}</p>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4 space-y-2">
+        <div className="glass-card rounded-2xl p-4 space-y-2">
           <div className="flex items-center gap-2">
             <Cog className="h-4 w-4 text-success" />
-            <p className="text-sm font-semibold">Automation</p>
+            <p className="text-sm font-semibold">Reminders</p>
           </div>
-          <p className="text-xs text-white/60">
-            Last run: {status?.lastRunAt ? new Date(status.lastRunAt).toLocaleString() : "Never"} | Result:{" "}
-            {status?.lastRunStatus || "N/A"} | Insights: {status?.insightsGenerated || 0} | Notifications:{" "}
-            {status?.notificationsCreated || 0}
+          <p className="text-xs text-muted-foreground">
+            {status?.lastRunAt
+              ? `We last reviewed family notes on ${new Date(status.lastRunAt).toLocaleString()}.`
+              : "Run a check anytime to refresh gentle follow-ups from recent notes."}
+            {status?.lastRunStatus === "failed"
+              ? " The last check didn’t finish—try again in a moment."
+              : ""}
           </p>
           <Button onClick={runNow} className="h-9 rounded-xl bg-success hover:bg-success/90">
-            <PlayCircle className="h-4 w-4 mr-2" /> Run analysis now
+            <PlayCircle className="h-4 w-4 mr-2" /> Run reminder check now
           </Button>
           {settings && (
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <div>
-                <p className="text-xs text-white/55 mb-1">Min mentions</p>
-                <Input
-                  type="number"
-                  value={settings.minMentions}
-                  onChange={(e) =>
-                    setSettings((prev) =>
-                      prev ? { ...prev, minMentions: Number(e.target.value || "3") } : prev
-                    )
-                  }
-                />
-              </div>
-              <div>
-                <p className="text-xs text-white/55 mb-1">Min confidence</p>
-                <Input
-                  type="number"
-                  step="0.05"
-                  value={settings.minConfidence}
-                  onChange={(e) =>
-                    setSettings((prev) =>
-                      prev ? { ...prev, minConfidence: Number(e.target.value || "0.7") } : prev
-                    )
-                  }
-                />
-              </div>
-              <div className="col-span-2 flex items-center justify-between text-sm">
-                <span>Pain alerts</span>
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between text-sm">
+                <span>Urgent symptom alerts</span>
                 <button
                   type="button"
                   onClick={() =>
@@ -564,154 +484,71 @@ export default function AdminPage() {
                     )
                   }
                   className={`h-7 w-12 rounded-full p-1 transition-soft ${
-                    settings.notificationsEnabled ? "bg-success" : "bg-white/20"
+                    settings.notificationsEnabled ? "bg-success" : "bg-muted"
                   }`}
                 >
                   <span
-                    className={`block h-5 w-5 rounded-full bg-white transition-soft ${
+                    className={`block h-5 w-5 rounded-full bg-card shadow-sm transition-soft ${
                       settings.notificationsEnabled ? "translate-x-5" : "translate-x-0"
                     }`}
                   />
                 </button>
               </div>
-              <div className="col-span-2">
-                <Button onClick={saveSettings} className="h-9 rounded-xl">
-                  Save thresholds
-                </Button>
-              </div>
+              <details className="rounded-xl border border-border/50 bg-muted/15 px-3 py-2">
+                <summary className="cursor-pointer text-xs font-medium text-foreground">Advanced tuning</summary>
+                <div className="grid grid-cols-2 gap-3 pt-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Repeat mentions (minimum)</p>
+                    <Input
+                      type="number"
+                      value={settings.minMentions}
+                      onChange={(e) =>
+                        setSettings((prev) =>
+                          prev ? { ...prev, minMentions: Number(e.target.value || "3") } : prev
+                        )
+                      }
+                    />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Match strength (0–1)</p>
+                    <Input
+                      type="number"
+                      step="0.05"
+                      value={settings.minConfidence}
+                      onChange={(e) =>
+                        setSettings((prev) =>
+                          prev ? { ...prev, minConfidence: Number(e.target.value || "0.7") } : prev
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <Button onClick={saveSettings} className="h-9 rounded-xl w-full sm:w-auto">
+                      Save reminder settings
+                    </Button>
+                  </div>
+                </div>
+              </details>
             </div>
           )}
         </div>
-            <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <FileSearch className="h-4 w-4 text-warning" />
-                  <p className="text-sm font-semibold">AI observability</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    className="h-8"
-                    onClick={() =>
-                      exportCsv(
-                        `ai-observability-${new Date().toISOString().slice(0, 10)}.csv`,
-                        (observability?.trend || []).map((point) => ({
-                          date: point.date,
-                          successes: point.successes,
-                          failures: point.failures,
-                          retries: point.retries
-                        }))
-                      )
-                    }
-                  >
-                    <Download className="h-4 w-4 mr-2" /> Export
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-8"
-                    onClick={() => fetchObservability()}
-                    disabled={observabilityLoading}
-                  >
-                    Refresh
-                  </Button>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <p className="text-xs text-white/60">Lookback</p>
-                <Input
-                  type="number"
-                  min={1}
-                  max={90}
-                  value={observabilityDays}
-                  onChange={(e) => setObservabilityDays(e.target.value)}
-                  className="h-8 w-20"
-                />
-                <p className="text-xs text-white/60">days</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl border border-white/10 p-3">
-                  <p className="text-[11px] text-white/55">Insight success rate</p>
-                  <p className="text-lg font-semibold">
-                    {observability ? `${(observability.insightSuccessRate * 100).toFixed(1)}%` : "--"}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-white/10 p-3">
-                  <p className="text-[11px] text-white/55">Total stage events</p>
-                  <p className="text-lg font-semibold">{observability?.totalEvents ?? "--"}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 p-3">
-                  <p className="text-[11px] text-white/55">AI processing failures</p>
-                  <p className="text-lg font-semibold text-destructive">{observability?.failures ?? "--"}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 p-3">
-                  <p className="text-[11px] text-white/55">Extraction failures</p>
-                  <p className="text-lg font-semibold text-destructive">{observability?.extractionFailures ?? "--"}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 p-3 col-span-2">
-                  <p className="text-[11px] text-white/55">Retry events</p>
-                  <p className="text-lg font-semibold">{observability?.retryEvents ?? "--"}</p>
-                </div>
-              </div>
-              <p className="text-xs text-white/50">
-                {observabilityLoading
-                  ? "Loading observability metrics..."
-                  : "Metrics reflect extractor/trend/insight stage logs from background AI processing. Auto-refresh: 30s."}
-              </p>
-              {observability?.trend?.length ? (
-                <div className="space-y-2 pt-1">
-                  <p className="text-xs text-white/60">Daily stage trend</p>
-                  {observability.trend.map((point) => {
-                    const total = point.successes + point.failures;
-                    const successWidth = total ? (point.successes / maxDailyEvents) * 100 : 0;
-                    const failureWidth = total ? (point.failures / maxDailyEvents) * 100 : 0;
-                    return (
-                      <div key={point.date} className="grid grid-cols-[78px_1fr] gap-2 items-center">
-                        <p className="text-[11px] text-white/50">{point.date.slice(5)}</p>
-                        <div className="rounded-md bg-black/25 h-3 overflow-hidden flex">
-                          <div className="bg-success/80 h-3" style={{ width: `${successWidth}%` }} />
-                          <div className="bg-destructive/80 h-3" style={{ width: `${failureWidth}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-              <div className="pt-1">
-                <p className="text-xs text-white/60 mb-1">Recent failures</p>
-                <div className="space-y-1.5">
-                  {(observability?.recentFailures || []).map((item, idx) => (
-                    <div key={`${item.timestamp}-${idx}`} className="rounded-lg border border-white/10 p-2">
-                      <p className="text-[11px] text-white/50">
-                        {new Date(item.timestamp).toLocaleString()} · {item.stage}
-                      </p>
-                      <p className="text-xs text-white/80 mt-1 line-clamp-2">
-                        {item.errorMessage || "No error message captured"}
-                      </p>
-                    </div>
-                  ))}
-                  {!observability?.recentFailures?.length && (
-                    <p className="text-xs text-white/50">No recent failures in this lookback window.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4">
+            <div className="glass-card rounded-2xl p-4">
               <p className="text-sm font-semibold mb-2">Recent log activity</p>
               <div className="space-y-2">
                 {latestLogs.map((l) => (
-                  <div key={l.id} className="rounded-lg border border-white/10 p-2.5">
-                    <p className="text-xs text-white/50">
+                  <div key={l.id} className="rounded-lg border border-border/50 bg-background/40 p-2.5">
+                    <p className="text-xs text-muted-foreground">
                       {new Date(l.timestamp).toLocaleString()} · {memberNameById.get(l.memberId) || "Unknown"}
                     </p>
                     <p className="text-sm mt-1 line-clamp-2">{l.text}</p>
                   </div>
                 ))}
-                {latestLogs.length === 0 && <p className="text-xs text-white/50">No logs yet.</p>}
+                {latestLogs.length === 0 && <p className="text-xs text-muted-foreground">No logs yet.</p>}
               </div>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4">
+            <div className="glass-card rounded-2xl p-4">
               <div className="flex items-center justify-between gap-2 mb-2">
-                <p className="text-sm font-semibold">Contextual re-engagement</p>
+                <p className="text-sm font-semibold">Follow-up reminders</p>
                 <Button variant="outline" className="h-8" onClick={() => fetchReengagementPrompts()}>
                   Refresh
                 </Button>
@@ -720,10 +557,8 @@ export default function AdminPage() {
                 {reengagementPrompts.slice(0, 6).map((prompt) => {
                   const memberName = memberNameById.get(prompt.memberId) || "Member";
                   return (
-                    <div key={prompt.id} className="rounded-lg border border-white/10 p-3">
-                      <p className="text-xs text-white/50">
-                        {memberName} · {prompt.reason}
-                      </p>
+                    <div key={prompt.id} className="rounded-lg border border-border/50 bg-background/40 p-3">
+                      <p className="text-xs text-muted-foreground">For {memberName}</p>
                       <p className="text-sm mt-1">{prompt.prompt}</p>
                       <div className="mt-2">
                         <Button
@@ -731,14 +566,14 @@ export default function AdminPage() {
                           className="h-8"
                           onClick={() => navigate(`/member/${prompt.memberId}`)}
                         >
-                          Open member timeline
+                          Open their page
                         </Button>
                       </div>
                     </div>
                   );
                 })}
                 {reengagementPrompts.length === 0 ? (
-                  <p className="text-xs text-white/50">No contextual follow-up prompts right now.</p>
+                  <p className="text-xs text-muted-foreground">No follow-up reminders right now.</p>
                 ) : null}
               </div>
             </div>
@@ -746,7 +581,7 @@ export default function AdminPage() {
         )}
 
         {activeTab === "team" && (
-          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4 space-y-3">
+          <div className="glass-card rounded-2xl p-4 space-y-3">
           <div className="flex items-center gap-2">
             <Users className="h-4 w-4 text-primary" />
             <p className="text-sm font-semibold">Team & roles</p>
@@ -783,7 +618,7 @@ export default function AdminPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="caregiver">Caregiver</SelectItem>
-                <SelectItem value="viewer">Viewer</SelectItem>
+                <SelectItem value="viewer">View only</SelectItem>
               </SelectContent>
             </Select>
             <Button
@@ -819,10 +654,10 @@ export default function AdminPage() {
           </div>
           <div className="space-y-2">
             {filteredUsers.map((u) => (
-              <div key={u.id} className="rounded-xl border border-white/10 p-3 flex items-center justify-between gap-3">
+              <div key={u.id} className="rounded-xl border border-border/50 bg-muted/15 p-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium">{u.name}</p>
-                  <p className="text-xs text-white/55">{u.email}</p>
+                  <p className="text-xs text-muted-foreground">{u.email}</p>
                 </div>
                 <Select
                   value={u.role}
@@ -852,7 +687,7 @@ export default function AdminPage() {
                   <SelectContent>
                     <SelectItem value="owner">Owner</SelectItem>
                     <SelectItem value="caregiver">Caregiver</SelectItem>
-                    <SelectItem value="viewer">Viewer</SelectItem>
+                    <SelectItem value="viewer">View only</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -862,7 +697,7 @@ export default function AdminPage() {
         )}
 
         {activeTab === "members" && (
-          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4 space-y-3">
+          <div className="glass-card rounded-2xl p-4 space-y-3">
           <div className="flex items-center gap-2">
             <Shield className="h-4 w-4 text-warning" />
             <p className="text-sm font-semibold">Member management</p>
@@ -952,12 +787,12 @@ export default function AdminPage() {
           </div>
           <div className="space-y-2">
             {filteredMembers.map((m) => (
-              <div key={m.id} className="rounded-xl border border-white/10 p-3 flex items-center justify-between gap-3">
+              <div key={m.id} className="rounded-xl border border-border/50 bg-muted/15 p-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium">
                     {m.name} ({m.age})
                   </p>
-                  <p className="text-xs text-white/55">{m.relationship}</p>
+                  <p className="text-xs text-muted-foreground">{m.relationship}</p>
                 </div>
                 <Button
                   variant="destructive"
@@ -973,14 +808,14 @@ export default function AdminPage() {
         )}
 
         {activeTab === "alerts" && (
-          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4">
+          <div className="glass-card rounded-2xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <Bell className="h-4 w-4 text-warning" />
-            <p className="text-sm font-semibold">Latest notifications</p>
+            <p className="text-sm font-semibold">Reminder inbox</p>
           </div>
           <div className="flex gap-2 mb-3">
             <Input
-              placeholder="Search alerts by message or severity"
+              placeholder="Search reminders"
               value={alertQuery}
               onChange={(e) => setAlertQuery(e.target.value)}
             />
@@ -991,8 +826,8 @@ export default function AdminPage() {
                   "alerts.csv",
                   filteredNotifications.map((n) => ({
                     createdAt: n.createdAt,
-                    severity: n.severity,
-                    isRead: n.isRead,
+                    importance: gentleReminderImportance(n.severity),
+                    read: n.isRead ? "yes" : "no",
                     message: n.message
                   }))
                 )
@@ -1007,29 +842,32 @@ export default function AdminPage() {
                 key={n.id}
                 onClick={() => markRead(n.id)}
                 className={`w-full text-left rounded-xl p-3 border ${
-                  n.isRead ? "border-white/10 bg-black/10" : "border-success/30 bg-success/10"
+                  n.isRead ? "border-border/50 bg-muted/40" : "border-success/30 bg-success/10"
                 }`}
               >
-                <p className="text-xs text-white/50">
-                  {new Date(n.createdAt).toLocaleString()} · {n.severity}
+                <p className="text-xs text-muted-foreground">
+                  {new Date(n.createdAt).toLocaleString()} · {gentleReminderImportance(n.severity)}
                 </p>
                 <p className="text-sm mt-1">{n.message}</p>
               </button>
             ))}
-            {filteredNotifications.length === 0 && <p className="text-xs text-white/50">No notifications found.</p>}
+            {filteredNotifications.length === 0 && <p className="text-xs text-muted-foreground">No notifications found.</p>}
           </div>
           </div>
         )}
 
         {activeTab === "audit" && (
-          <div className="rounded-2xl border border-white/10 bg-[#201d1b] p-4">
+          <div className="glass-card rounded-2xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <ClipboardList className="h-4 w-4 text-warning" />
-              <p className="text-sm font-semibold">Audit log viewer</p>
+              <p className="text-sm font-semibold">Who did what</p>
+              <p className="text-[11px] text-muted-foreground mb-1">
+                A plain-language log for your family. Technical filters are optional.
+              </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-3">
               <Input
-                placeholder="Filter by action (e.g. member.create)"
+                placeholder="Optional: narrow by activity type"
                 value={auditAction}
                 onChange={(e) => setAuditAction(e.target.value)}
               />
@@ -1066,10 +904,8 @@ export default function AdminPage() {
                       auditRows.map((r) => ({
                         createdAt: r.createdAt,
                         actorEmail: r.actorEmail,
-                        action: r.action,
-                        targetType: r.targetType,
-                        targetId: r.targetId || "",
-                        metadata: JSON.stringify(r.metadata || {})
+                        summary: formatActivityAction(r.action),
+                        about: formatActivityTargetType(r.targetType)
                       }))
                     )
                   }
@@ -1080,25 +916,23 @@ export default function AdminPage() {
             </div>
             <div className="space-y-2">
               {auditRows.map((r) => (
-                <div key={r.id} className="rounded-lg border border-white/10 p-3">
-                  <p className="text-xs text-white/50">
+                <div key={r.id} className="rounded-lg border border-border/50 bg-background/40 p-3">
+                  <p className="text-xs text-muted-foreground">
                     {new Date(r.createdAt).toLocaleString()} · {r.actorEmail}
                   </p>
                   <p className="text-sm mt-1">
-                    <span className="font-medium">{r.action}</span> on {r.targetType}
-                    {r.targetId ? ` (${r.targetId})` : ""}
+                    <span className="font-medium">{formatActivityAction(r.action)}</span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      · {formatActivityTargetType(r.targetType)}
+                    </span>
                   </p>
-                  {Object.keys(r.metadata || {}).length > 0 ? (
-                    <p className="text-xs text-white/55 mt-1 line-clamp-2">
-                      metadata: {JSON.stringify(r.metadata)}
-                    </p>
-                  ) : null}
                 </div>
               ))}
-              {auditRows.length === 0 && <p className="text-xs text-white/50">No audit records found.</p>}
+              {auditRows.length === 0 && <p className="text-xs text-muted-foreground">No audit records found.</p>}
             </div>
             <div className="flex items-center justify-between mt-3">
-              <p className="text-xs text-white/50">
+              <p className="text-xs text-muted-foreground">
                 Showing {auditRows.length ? auditOffset + 1 : 0}-
                 {Math.min(auditOffset + auditRows.length, auditTotal)} of {auditTotal}
               </p>

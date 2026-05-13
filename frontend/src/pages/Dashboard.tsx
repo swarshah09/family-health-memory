@@ -1,7 +1,7 @@
 import { useApp } from "@/context/AppContext";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Plus, ChevronRight, LogOut, Sparkles, TrendingUp, Clock, Heart, Users, FileText, UserPlus, Home } from "lucide-react";
+import { Plus, ChevronRight, Sparkles, TrendingUp, Clock, Heart, Users, FileText, UserPlus, Home } from "lucide-react";
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import AddMemberDialog from "@/components/AddMemberDialog";
@@ -19,7 +19,7 @@ const fadeUp = {
 };
 
 export default function Dashboard() {
-  const { user, members, logs, logout, getAllInsights, getLogsForMember, pendingJoinInboxCount } = useApp();
+  const { user, members, logs, getAllInsights, getLogsForMember, pendingJoinInboxCount } = useApp();
   const navigate = useNavigate();
   const [showAddMember, setShowAddMember] = useState(false);
   const insights = getAllInsights();
@@ -64,22 +64,16 @@ export default function Dashboard() {
           <div className="absolute top-0 right-0 w-64 h-64 rounded-full bg-white/5 -translate-y-1/2 translate-x-1/3" />
           <div className="absolute bottom-0 left-0 w-48 h-48 rounded-full bg-white/5 translate-y-1/2 -translate-x-1/4" />
 
-          <div className="flex items-center justify-between mb-8 relative z-10">
+          <div className="mb-8 flex items-start justify-between gap-3 pr-10 relative z-10">
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.2 }}
+              className="min-w-0"
             >
               <p className="text-primary-foreground/70 text-sm font-medium">{greeting},</p>
               <h1 className="text-2xl font-display font-bold text-primary-foreground">{user?.name || "User"} 👋</h1>
             </motion.div>
-            <motion.button
-              onClick={logout}
-              className="text-primary-foreground/50 hover:text-primary-foreground p-2.5 rounded-xl hover:bg-primary-foreground/10 transition-colors"
-              whileTap={{ scale: 0.9 }}
-            >
-              <LogOut className="h-5 w-5" />
-            </motion.button>
           </div>
 
           <div className="flex flex-col gap-3 relative z-10">
@@ -87,7 +81,7 @@ export default function Dashboard() {
             <AnimatePresence>
               {alertCount > 0 && (
                 <motion.button
-                  onClick={() => navigate("/insights")}
+                  onClick={() => navigate("/insights/patterns")}
                   className="w-full bg-primary-foreground/15 backdrop-blur-md rounded-2xl p-4 flex items-center gap-3 border border-primary-foreground/20"
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -104,9 +98,8 @@ export default function Dashboard() {
                   </motion.div>
                   <div className="flex-1 text-left">
                     <p className="text-primary-foreground text-sm font-semibold">
-                      {alertCount} priority insight{alertCount > 1 ? "s" : ""} detected
+                      {alertCount} priority insight{alertCount > 1 ? "s" : ""}
                     </p>
-                    <p className="text-primary-foreground/60 text-xs">Review observations and evidence</p>
                   </div>
                   <div className="h-8 w-8 rounded-full bg-primary-foreground/20 flex items-center justify-center">
                     <span className="text-xs font-bold text-primary-foreground">{alertCount}</span>
@@ -118,7 +111,7 @@ export default function Dashboard() {
               {pendingJoinInboxCount > 0 && (
                 <motion.button
                   type="button"
-                  onClick={() => navigate("/workspace")}
+                  onClick={() => navigate("/family/workspace")}
                   className="w-full bg-amber-400/20 backdrop-blur-md rounded-2xl p-4 flex items-center gap-3 border border-amber-300/35"
                   initial={{ opacity: 0, scale: 0.96 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -131,9 +124,8 @@ export default function Dashboard() {
                   </div>
                   <div className="flex-1 text-left min-w-0">
                     <p className="text-primary-foreground text-sm font-semibold">
-                      {pendingJoinInboxCount} join request{pendingJoinInboxCount > 1 ? "s" : ""} waiting
+                      {pendingJoinInboxCount} join request{pendingJoinInboxCount > 1 ? "s" : ""}
                     </p>
-                    <p className="text-primary-foreground/65 text-xs">Open Family to approve or decline</p>
                   </div>
                   <div className="h-8 w-8 rounded-full bg-amber-400/30 flex items-center justify-center shrink-0">
                     <span className="text-xs font-bold text-primary-foreground">{pendingJoinInboxCount}</span>
@@ -212,16 +204,13 @@ export default function Dashboard() {
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">My Health</p>
                 <p className="text-sm font-semibold text-foreground mt-0.5">{myHealthMember.name}</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Private to you; family heads can view when supporting your care.
-                </p>
               </div>
               <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
             </motion.button>
           )}
           <motion.button
             type="button"
-            onClick={() => navigate("/workspace")}
+            onClick={() => navigate("/family/workspace")}
             className="w-full glass-card rounded-2xl p-4 flex items-center gap-4 text-left border border-border/50 hover:border-primary/25 transition-colors"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -232,37 +221,32 @@ export default function Dashboard() {
               <Home className="h-5 w-5 text-muted-foreground" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Family Workspace</p>
-              <p className="text-sm font-semibold text-foreground mt-0.5">Team, roles & activity</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Join requests, permissions, and shared workspace tools.</p>
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Family</p>
+              <p className="text-sm font-semibold text-foreground mt-0.5">Family & team</p>
             </div>
             <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
           </motion.button>
         </div>
         {topInsight && (
           <motion.button
-            onClick={() => navigate("/insights")}
+            onClick={() => navigate("/insights/patterns")}
             className="w-full mb-4 glass-card-hover rounded-2xl p-4 text-left"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
           >
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Weekly snapshot</p>
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Insight</p>
             <p className="text-sm font-medium text-foreground mt-1">{topInsight.title}</p>
-            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{topInsight.description}</p>
           </motion.button>
         )}
         {inactiveMembers.length > 0 && (
           <div className="mb-4 glass-card rounded-2xl p-4 border border-warning/20 border-l-4 border-l-warning">
             <p className="text-[10px] uppercase tracking-widest text-warning font-semibold">Follow-up suggestion</p>
-            <p className="text-sm text-foreground mt-1">
-              No recent updates for {inactiveMembers.map((m) => m.name).join(", ")}. Add a quick check-in to keep the timeline current.
-            </p>
+            <p className="text-sm text-foreground mt-1">Quiet logs: {inactiveMembers.map((m) => m.name).join(", ")}</p>
           </div>
         )}
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="section-title">People You Track</h2>
-            <p className="text-[11px] text-muted-foreground mt-0.5">You never appear in this list — only people you monitor.</p>
+            <h2 className="section-title">People you track</h2>
           </div>
           <motion.div whileTap={{ scale: 0.95 }}>
             <Button

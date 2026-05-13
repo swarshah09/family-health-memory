@@ -18,11 +18,13 @@ import {
 import { toast } from "sonner";
 import { toastFromCaughtError } from "@/lib/toast-errors";
 import { displayRoleLabel } from "@/lib/collaboration-roles";
+import { useAppHub } from "@/lib/hub-outlet";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
 export default function ProfilePage() {
   const navigate = useNavigate();
+  const inYouHub = useAppHub()?.hub === "you";
   const { user, updateProfile, uploadProfilePhoto, leaveFamily } = useApp();
   const [name, setName] = useState(user?.name || "");
   const [description, setDescription] = useState(user?.description || "");
@@ -103,21 +105,22 @@ export default function ProfilePage() {
 
   return (
     <div className="app-shell app-safe-bottom">
-      <div className="bg-card border-b border-border/40 px-5 pt-12 pb-6">
+      <div className={`bg-card border-b border-border/40 px-5 pb-6 ${inYouHub ? "pt-6" : "pt-12"}`}>
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => navigate("/")}
-            className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
+          {!inYouHub && (
+            <button
+              type="button"
+              onClick={() => navigate("/")}
+              className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+          )}
           <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center">
             <User className="h-4 w-4 text-primary" />
           </div>
           <div>
             <h1 className="font-display font-bold text-foreground text-lg">Your profile</h1>
-            <p className="text-[11px] text-muted-foreground">Private to your account; shared basics with your family team</p>
           </div>
         </div>
       </div>
@@ -172,28 +175,15 @@ export default function ProfilePage() {
           {user?.familyId ? (
             <>
               <p className="text-xs text-foreground">
-                <span className="text-muted-foreground">Workspace role:</span> {workspaceLabel}
+                <span className="text-muted-foreground">Your role:</span> {workspaceLabel}
               </p>
               {user.familyName ? (
                 <p className="text-[11px] text-muted-foreground mt-1">
                   Family name: <span className="text-foreground/90">{user.familyName}</span>
                 </p>
               ) : null}
-              <p className="text-[11px] text-muted-foreground leading-relaxed mt-1">
-                Workspace ID (click to copy):{" "}
-                <button
-                  type="button"
-                  title="Click to copy family ID"
-                  onClick={() => {
-                    void navigator.clipboard
-                      .writeText(user.familyId!)
-                      .then(() => toast.success("Family ID copied"))
-                      .catch(() => toast.error("Could not copy"));
-                  }}
-                  className="font-mono text-xs text-foreground/90 rounded-lg px-1.5 py-0.5 -mx-0.5 hover:bg-muted border border-transparent hover:border-border transition-colors cursor-pointer text-left break-all align-baseline"
-                >
-                  {user.familyId}
-                </button>
+              <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed">
+                Need the invite code someone uses to join? Open Settings and expand <span className="font-medium text-foreground/90">Advanced</span>.
               </p>
               <Button
                 type="button"

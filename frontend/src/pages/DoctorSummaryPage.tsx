@@ -5,6 +5,8 @@ import { useApp } from "@/context/AppContext";
 import { toastFromCaughtError, toastError } from "@/lib/toast-errors";
 import type { DoctorSummaryDocument } from "@/types/doctor-summary";
 import { formatEvidenceLogLabel } from "@/lib/evidence-log-label";
+import { CopyHint } from "@/components/CopyHint";
+import { OBSERVATIONAL_NOT_DIAGNOSIS } from "@/lib/disclaimer-copy";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -33,7 +35,7 @@ export default function DoctorSummaryPage() {
       .catch((err: unknown) => {
         toastFromCaughtError(
           err,
-          "Doctor visit summary unavailable",
+          "Visit summary unavailable",
           "We could not load the generated summary. Check your connection or try again later."
         );
         setDoctorSummary(null);
@@ -98,26 +100,32 @@ export default function DoctorSummaryPage() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Preparing summary...</p>
+        <p className="text-[11px] text-muted-foreground">Loading…</p>
       ) : !doctorSummary ? (
-        <p className="text-sm text-muted-foreground">Summary unavailable.</p>
+        <p className="text-[11px] text-muted-foreground">Summary unavailable.</p>
       ) : (
         <article className="max-w-3xl mx-auto bg-card border border-border/50 rounded-2xl p-6 md:p-8 print:shadow-none print:border-0 print:rounded-none print:p-0 print:max-w-none">
           <header className="border-b border-border/40 pb-4 print:border-black/20">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground print:text-black/70">
-              Family health observations — not a diagnosis
-            </p>
-            <h1 className="text-2xl font-display font-bold text-foreground mt-1 print:text-black">{doctorSummary.title}</h1>
-            <p className="text-xs text-muted-foreground mt-1 print:text-black/80">{doctorSummary.subtitle}</p>
-            <p className="text-xs text-muted-foreground mt-2 print:text-black/80">
+            <div className="flex items-start gap-1">
+              <h1 className="text-2xl font-display font-bold text-foreground print:text-black">{doctorSummary.title}</h1>
+              <span className="print:hidden">
+                <CopyHint label="About this summary">{OBSERVATIONAL_NOT_DIAGNOSIS}</CopyHint>
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-2 print:text-black/80">
               {doctorSummary.periodLabel}
               {member ? ` · ${member.name}` : ""} · Generated {new Date(doctorSummary.generatedAt).toLocaleString()}
+            </p>
+            <p className="mt-2 hidden text-[10px] text-muted-foreground print:block print:text-black/75">
+              {OBSERVATIONAL_NOT_DIAGNOSIS}
             </p>
           </header>
 
           <section className="mt-5 print:break-inside-avoid">
             <h2 className="text-xs font-bold uppercase tracking-wide text-foreground print:text-black">Disclaimer</h2>
-            <p className="text-sm text-muted-foreground mt-2 leading-relaxed print:text-black/90">{doctorSummary.observationalDisclaimer}</p>
+            <p className="text-sm text-muted-foreground mt-2 leading-relaxed print:text-black/90">
+              {doctorSummary.observationalDisclaimer}
+            </p>
           </section>
 
           <section className="mt-5 print:break-inside-avoid">
@@ -127,9 +135,6 @@ export default function DoctorSummaryPage() {
 
           <section className="mt-6 print:break-inside-avoid">
             <h2 className="text-xs font-bold uppercase tracking-wide text-foreground print:text-black">Recurring symptoms</h2>
-            <p className="text-[11px] text-muted-foreground mt-1 print:text-black/80">
-              Tags that appear on more than one log entry in the window (family-recorded).
-            </p>
             <ul className="mt-2 space-y-1">
               {doctorSummary.recurringSymptoms.length ? (
                 doctorSummary.recurringSymptoms.map((row) => (
@@ -145,7 +150,6 @@ export default function DoctorSummaryPage() {
 
           <section className="mt-6 print:break-inside-avoid">
             <h2 className="text-xs font-bold uppercase tracking-wide text-foreground print:text-black">Symptom frequency</h2>
-            <p className="text-[11px] text-muted-foreground mt-1 print:text-black/80">All tagged symptom mentions in the covered window.</p>
             <ul className="mt-2 grid sm:grid-cols-2 gap-x-4 gap-y-1">
               {doctorSummary.symptomFrequency.slice(0, 24).map((row) => (
                 <li key={row.symptom} className="text-sm text-foreground print:text-black flex justify-between gap-2 border-b border-border/30 print:border-black/10 pb-0.5">
@@ -155,7 +159,7 @@ export default function DoctorSummaryPage() {
               ))}
             </ul>
             {doctorSummary.symptomFrequency.length === 0 && (
-              <p className="text-sm text-muted-foreground mt-1 print:text-black/80">No symptom tags on logs in this window.</p>
+              <p className="text-[11px] text-muted-foreground mt-1 print:text-black/80">No symptom tags in this range.</p>
             )}
           </section>
 
@@ -176,7 +180,7 @@ export default function DoctorSummaryPage() {
           </section>
 
           <section className="mt-6 print:break-inside-avoid">
-            <h2 className="text-xs font-bold uppercase tracking-wide text-foreground print:text-black">Timeline — notable clusters</h2>
+            <h2 className="text-xs font-bold uppercase tracking-wide text-foreground print:text-black">Health story</h2>
             <ul className="mt-2 space-y-2">
               {doctorSummary.majorChangesTimeline.length ? (
                 doctorSummary.majorChangesTimeline.map((row, idx) => (
@@ -186,7 +190,7 @@ export default function DoctorSummaryPage() {
                   </li>
                 ))
               ) : (
-                <li className="text-sm text-muted-foreground print:text-black/80">No major narrative clusters in this window.</li>
+                <li className="text-sm text-muted-foreground print:text-black/80">Nothing notable in this range.</li>
               )}
             </ul>
           </section>
@@ -203,9 +207,16 @@ export default function DoctorSummaryPage() {
           </section>
 
           <section className="mt-6 print:break-inside-avoid">
-            <h2 className="text-xs font-bold uppercase tracking-wide text-destructive print:text-black">Red-flag alerts</h2>
-            <p className="text-[11px] text-muted-foreground mt-1 print:text-black/80">
-              Automated flags from family notes — review with a clinician; not an emergency assessment.
+            <div className="flex items-center gap-1">
+              <h2 className="text-xs font-bold uppercase tracking-wide text-destructive print:text-black">Red-flag alerts</h2>
+              <span className="print:hidden">
+                <CopyHint label="About red-flag alerts">
+                  From saved notes only. Not an emergency assessment—use clinical care for urgent symptoms.
+                </CopyHint>
+              </span>
+            </div>
+            <p className="mt-1 hidden text-[10px] text-muted-foreground print:block print:text-black/80">
+              From saved notes only. Not an emergency assessment.
             </p>
             <ul className="mt-2 space-y-3">
               {doctorSummary.redFlagEvents.length ? (
@@ -225,10 +236,7 @@ export default function DoctorSummaryPage() {
           </section>
 
           <section className="mt-6 print:break-inside-avoid">
-            <h2 className="text-xs font-bold uppercase tracking-wide text-foreground print:text-black">AI-assisted weekly summaries</h2>
-            <p className="text-[11px] text-muted-foreground mt-1 print:text-black/80">
-              From stored weekly digests in this app (may overlap partial weeks).
-            </p>
+            <h2 className="text-xs font-bold uppercase tracking-wide text-foreground print:text-black">Weekly summaries</h2>
             <div className="mt-3 space-y-4">
               {doctorSummary.aiWeeklySummaries.length ? (
                 doctorSummary.aiWeeklySummaries.map((w) => (
@@ -248,9 +256,7 @@ export default function DoctorSummaryPage() {
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-muted-foreground print:text-black/80">
-                  No weekly digest yet overlaps this date range — digests appear after background jobs run.
-                </p>
+                <p className="text-[11px] text-muted-foreground print:text-black/80">No digests in this range.</p>
               )}
             </div>
           </section>

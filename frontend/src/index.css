@@ -59,33 +59,41 @@
   }
 
   .dark {
-    --background: 220 25% 7%;
-    --foreground: 210 20% 95%;
-    --card: 220 25% 10%;
-    --card-foreground: 210 20% 95%;
-    --popover: 220 25% 10%;
-    --popover-foreground: 210 20% 95%;
-    --primary: 199 89% 52%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 220 20% 16%;
-    --secondary-foreground: 210 20% 85%;
-    --muted: 220 15% 16%;
-    --muted-foreground: 215 15% 55%;
-    --accent: 162 63% 45%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 4 62% 40%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 220 15% 18%;
-    --input: 220 15% 18%;
-    --ring: 199 89% 52%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --background: 32 22% 10%;
+    --foreground: 40 25% 96%;
+    --card: 30 18% 14%;
+    --card-foreground: 40 22% 95%;
+    --popover: 30 18% 14%;
+    --popover-foreground: 40 22% 95%;
+    --primary: 168 50% 46%;
+    --primary-foreground: 32 30% 8%;
+    --secondary: 32 14% 20%;
+    --secondary-foreground: 40 18% 90%;
+    --muted: 30 12% 18%;
+    --muted-foreground: 38 12% 62%;
+    --accent: 14 72% 58%;
+    --accent-foreground: 32 25% 10%;
+    --destructive: 6 62% 48%;
+    --destructive-foreground: 40 30% 98%;
+    --border: 30 14% 22%;
+    --input: 30 14% 22%;
+    --ring: 168 50% 50%;
+    --warning: 38 88% 58%;
+    --warning-foreground: 28 30% 12%;
+    --success: 158 48% 44%;
+    --success-foreground: 32 25% 8%;
+    --insight: 258 42% 62%;
+    --insight-foreground: 32 20% 10%;
+    --health-start: 158 45% 38%;
+    --health-end: 170 48% 40%;
+    --sidebar-background: 32 20% 11%;
+    --sidebar-foreground: 40 18% 92%;
+    --sidebar-primary: 168 50% 46%;
+    --sidebar-primary-foreground: 32 30% 8%;
+    --sidebar-accent: 30 14% 18%;
+    --sidebar-accent-foreground: 40 18% 92%;
+    --sidebar-border: 30 12% 20%;
+    --sidebar-ring: 168 50% 50%;
   }
 }
 
@@ -182,21 +190,48 @@
       radial-gradient(at 0% 100%, hsl(8, 79%, 60%, 0.04) 0px, transparent 50%);
   }
 
-  .app-shell {
-    @apply min-h-screen w-full mx-auto relative overflow-hidden;
-    max-width: 420px;
-    box-shadow: 0 0 0 1px hsl(var(--border) / 0.4);
-    background: hsl(var(--background));
+  .dark .mesh-bg {
+    background-image:
+      radial-gradient(at 40% 20%, hsl(168 50% 40% / 0.14) 0px, transparent 55%),
+      radial-gradient(at 80% 0%, hsl(170 45% 38% / 0.1) 0px, transparent 50%),
+      radial-gradient(at 0% 50%, hsl(258 42% 55% / 0.1) 0px, transparent 50%),
+      radial-gradient(at 80% 50%, hsl(38 70% 50% / 0.08) 0px, transparent 48%),
+      radial-gradient(at 0% 100%, hsl(14 72% 52% / 0.08) 0px, transparent 50%);
   }
 
+  /**
+   * App surface: width comes from the responsive frame in App.tsx (mobile column,
+   * tablet card, laptop main pane). Keep this full-bleed inside that frame.
+   */
+  .app-shell {
+    @apply relative min-h-screen w-full max-w-full overflow-x-hidden bg-background;
+  }
+
+  /* Extra scroll room above the bottom nav (mobile + tablet only; dock hidden lg+). */
   .app-safe-bottom {
-    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+    padding-bottom: calc(5.75rem + env(safe-area-inset-bottom));
+  }
+
+  @media (min-width: 768px) {
+    .app-safe-bottom {
+      padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .app-safe-bottom {
+      padding-bottom: calc(1.75rem + env(safe-area-inset-bottom));
+    }
   }
 
   .organic-orb {
     position: absolute;
     border-radius: 9999px;
-    background: hsl(0 0% 100% / 0.06);
+    background: hsl(var(--primary) / 0.09);
+  }
+
+  .dark .organic-orb {
+    background: hsl(var(--primary) / 0.14);
   }
 
   .doc-stack {
@@ -263,24 +298,14 @@
   }
 
   .dialog-backdrop {
-    background: linear-gradient(180deg, hsl(170 30% 8% / 0.2) 0%, hsl(170 30% 8% / 0.6) 100%);
+    background: linear-gradient(180deg, hsl(var(--foreground) / 0.06) 0%, hsl(var(--foreground) / 0.14) 100%);
   }
 
   .transition-soft {
     @apply transition-all duration-300 ease-out;
   }
 
-  .dock-shell {
-    @apply fixed bottom-0 left-0 right-0 bg-card/90 backdrop-blur-xl border-t border-border/60 px-6 py-3 flex justify-around z-50;
-    max-width: 420px;
-    margin: 0 auto;
-    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
-  }
-
-  .dock-item {
-    @apply flex flex-col items-center gap-1 relative py-1 transition-soft;
-  }
-
+  /* Bottom nav item states (used by AppDock). */
   .dock-item-idle {
     @apply text-muted-foreground;
   }
@@ -289,83 +314,19 @@
     color: hsl(var(--primary));
   }
 
-  .dock-icon {
-    @apply h-8 w-8 rounded-xl flex items-center justify-center relative transition-soft;
-  }
-
-  .dock-icon-active {
-    background: hsl(var(--primary) / 0.12);
-  }
-
-  .dock-label {
-    @apply text-[10px] font-medium;
-  }
-
-  .dock-item-active .dock-label {
-    @apply font-semibold;
-  }
-
-  .dock-item-idle .dock-icon:hover {
-    @apply bg-muted/70;
-  }
-
-  .dock-badge {
-    @apply absolute -top-1 -right-1 h-4 min-w-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center px-1;
-    font-size: 8px;
-    font-weight: 700;
-    line-height: 1;
-  }
-
   .fab-above-dock {
-    bottom: calc(5.5rem + env(safe-area-inset-bottom));
+    bottom: calc(5.75rem + env(safe-area-inset-bottom));
   }
 
-  @media (max-width: 640px) {
-    .app-shell {
-      max-width: 100%;
-      box-shadow: none;
-    }
-
-    .dock-shell {
-      max-width: 100%;
+  @media (min-width: 768px) {
+    .fab-above-dock {
+      bottom: calc(6.25rem + env(safe-area-inset-bottom));
     }
   }
 
-  @media (min-width: 641px) and (max-width: 1024px) {
-    .app-shell {
-      max-width: 640px;
-      border-radius: 22px;
-      margin-top: 20px;
-      margin-bottom: 20px;
-      box-shadow:
-        0 18px 40px hsl(170 22% 14% / 0.12),
-        0 0 0 1px hsl(var(--border) / 0.35);
-    }
-
-    .dock-shell {
-      max-width: 640px;
-      border-radius: 0 0 22px 22px;
-      border-left: 1px solid hsl(var(--border) / 0.55);
-      border-right: 1px solid hsl(var(--border) / 0.55);
-    }
-  }
-
-  @media (min-width: 1025px) {
-    .app-shell {
-      max-width: 860px;
-      border-radius: 26px;
-      margin-top: 26px;
-      margin-bottom: 26px;
-      box-shadow:
-        0 26px 56px hsl(170 22% 14% / 0.14),
-        0 0 0 1px hsl(var(--border) / 0.35);
-    }
-
-    .dock-shell {
-      max-width: 860px;
-      border-radius: 0 0 26px 26px;
-      border-left: 1px solid hsl(var(--border) / 0.55);
-      border-right: 1px solid hsl(var(--border) / 0.55);
+  @media (min-width: 1024px) {
+    .fab-above-dock {
+      bottom: calc(1.5rem + env(safe-area-inset-bottom));
     }
   }
 
@@ -427,7 +388,7 @@
     max-width: none !important;
   }
 
-  .dock-shell,
+  [data-app-dock],
   .print\:hidden {
     display: none !important;
   }

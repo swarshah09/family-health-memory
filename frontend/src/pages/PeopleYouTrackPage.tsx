@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
+import { useAppHub } from "@/lib/hub-outlet";
 import { ArrowLeft, ChevronRight, Clock, Plus, Users } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ const fadeUp = {
 export default function PeopleYouTrackPage() {
   const navigate = useNavigate();
   const { user, members, getLogsForMember, getAllInsights } = useApp();
+  const inHealthHub = useAppHub()?.hub === "health";
   const [showAddMember, setShowAddMember] = useState(false);
   const insights = getAllInsights();
 
@@ -28,33 +30,28 @@ export default function PeopleYouTrackPage() {
 
   return (
     <div className="app-shell app-safe-bottom">
-      <div className="bg-card border-b border-border/40 px-5 pt-12 pb-6">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => navigate("/")}
-            className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Users className="h-4 w-4 text-primary" />
-          </div>
-          <div>
-            <h1 className="font-display font-bold text-foreground text-lg">People You Track</h1>
-            <p className="text-[11px] text-muted-foreground">
-              {`Collaborative care — observations stay separate from each person's own logs`}
-            </p>
+      {!inHealthHub && (
+        <div className="bg-card border-b border-border/40 px-5 pt-12 pb-6">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate("/")}
+              className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Users className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <h1 className="font-display font-bold text-foreground text-lg">People you track</h1>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      <div className="px-5 py-5">
-        <div className="flex items-center justify-between mb-4">
-          <p className="text-xs text-muted-foreground max-w-[280px] leading-relaxed">
-            Your own health space lives under <span className="text-foreground font-medium">My Health</span>. This list
-            is only for people you support.
-          </p>
+      <div className={inHealthHub ? "px-5 py-4" : "px-5 py-5"}>
+        <div className="flex items-center justify-end mb-4">
           <Button
             size="sm"
             variant="outline"
@@ -122,12 +119,9 @@ export default function PeopleYouTrackPage() {
         </div>
 
         {tracked.length === 0 && (
-          <div className="text-center py-16 glass-card rounded-2xl mt-4">
-            <p className="text-foreground font-medium">No one in your tracking list yet</p>
-            <p className="text-muted-foreground text-sm mt-1 px-6">
-              {`Add a parent, child, or anyone whose health you help monitor. You won't see yourself here.`}
-            </p>
-            <Button className="mt-5 rounded-xl" onClick={() => setShowAddMember(true)}>
+          <div className="flex flex-col items-center gap-3 py-10">
+            <p className="text-[11px] text-muted-foreground text-center px-4">No one here yet.</p>
+            <Button className="rounded-xl" size="sm" onClick={() => setShowAddMember(true)}>
               <Plus className="h-4 w-4 mr-2" /> Add someone
             </Button>
           </div>

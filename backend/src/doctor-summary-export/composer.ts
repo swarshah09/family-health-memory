@@ -55,7 +55,7 @@ export function buildDoctorSummaryDocument(input: {
 
   return {
     title: base.title,
-    subtitle: "For clinical visits — observational timeline (last 30 days)",
+    subtitle: "",
     periodLabel: base.periodLabel,
     generatedAt: base.generatedAt,
     observationalDisclaimer: DISCLAIMER,

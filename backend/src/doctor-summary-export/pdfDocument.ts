@@ -29,7 +29,10 @@ export function renderDoctorSummaryPdf(data: DoctorSummaryDocument): Promise<Buf
 
     doc.font("Helvetica-Bold").fontSize(15).text(data.title, { align: "center" });
     doc.moveDown(0.2);
-    doc.font("Helvetica-Oblique").fontSize(9).fillColor("#333").text(data.subtitle, { align: "center" });
+    if (data.subtitle.trim()) {
+      doc.font("Helvetica-Oblique").fontSize(9).fillColor("#333").text(data.subtitle, { align: "center" });
+      doc.moveDown(0.15);
+    }
     doc.fillColor("#000");
     doc.font("Helvetica").fontSize(8.5).text(`${data.periodLabel} · Generated ${new Date(data.generatedAt).toLocaleString()}`, {
       align: "center"
@@ -68,18 +71,18 @@ export function renderDoctorSummaryPdf(data: DoctorSummaryDocument): Promise<Buf
       );
     } else doc.font("Helvetica").fontSize(9).text("Insufficient tagged data for trend comparison.");
 
-    sectionHeading(doc, "Timeline — notable narrative clusters");
+    sectionHeading(doc, "Health story (notable changes)");
     if (data.majorChangesTimeline.length) {
       bulletList(
         doc,
         data.majorChangesTimeline.map((e) => `${e.date}: ${e.event} — ${e.details}`)
       );
-    } else doc.font("Helvetica").fontSize(9).text("No narrative clusters in this window.");
+    } else doc.font("Helvetica").fontSize(9).text("No notable story beats in this window.");
 
-    sectionHeading(doc, "Medication-related observations (family notes)");
+    sectionHeading(doc, "Medications (from family notes)");
     bulletList(doc, data.medicationObservations);
 
-    sectionHeading(doc, "Red-flag pattern alerts (review with clinician)");
+    sectionHeading(doc, "Pattern alerts (review with a clinician)");
     if (data.redFlagEvents.length) {
       for (const ev of data.redFlagEvents) {
         doc.font("Helvetica-Bold").fontSize(9).text(ev.title);
@@ -87,11 +90,9 @@ export function renderDoctorSummaryPdf(data: DoctorSummaryDocument): Promise<Buf
         doc.text(ev.description, { align: "justify" });
         doc.moveDown(0.35);
       }
-    } else {
-      doc.font("Helvetica").fontSize(9).text("No red-flag type alerts recorded for this window.");
-    }
+    } else doc.font("Helvetica").fontSize(9).text("No pattern alerts recorded for this window.");
 
-    sectionHeading(doc, "AI-assisted weekly summaries (family app)");
+    sectionHeading(doc, "Weekly summaries");
     if (data.aiWeeklySummaries.length) {
       for (const w of data.aiWeeklySummaries) {
         doc.font("Helvetica-Bold").fontSize(9).text(w.weekLabel);

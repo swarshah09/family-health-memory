@@ -32,8 +32,10 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { formatActivityAction } from "@/lib/collaboration-roles";
 import { toastFromCaughtError } from "@/lib/toast-errors";
 import { isHeadUser } from "@/lib/collaboration-roles";
+import { useAppHub } from "@/lib/hub-outlet";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -62,6 +64,7 @@ type WorkspacePayload = {
 export default function FamilyWorkspacePage() {
   const navigate = useNavigate();
   const { user, members, familyUsers, loadFamilyUsers, refreshJoinRequestInbox } = useApp();
+  const inFamilyHub = useAppHub()?.hub === "family";
   const [data, setData] = useState<WorkspacePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [accessOpen, setAccessOpen] = useState(false);
@@ -89,7 +92,7 @@ export default function FamilyWorkspacePage() {
       const json = (await res.json()) as WorkspacePayload;
       setData(json);
     } catch (e) {
-      toastFromCaughtError(e, "Workspace unavailable", "Try refreshing in a moment.");
+      toastFromCaughtError(e, "Family page unavailable", "Try refreshing in a moment.");
       setData(null);
     } finally {
       setLoading(false);
@@ -194,16 +197,18 @@ export default function FamilyWorkspacePage() {
 
   return (
     <div className="app-shell app-safe-bottom min-h-screen bg-background">
-      <div className="px-5 pt-10 pb-4 border-b border-border/40 bg-card/40">
+      <div className={`px-5 border-b border-border/40 bg-card/40 ${inFamilyHub ? "pt-4 pb-4" : "pt-10 pb-4"}`}>
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => navigate("/")}
-            className="p-2 rounded-xl text-muted-foreground hover:bg-muted transition-colors"
-            aria-label="Back"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
+          {!inFamilyHub && (
+            <button
+              type="button"
+              onClick={() => navigate("/")}
+              className="p-2 rounded-xl text-muted-foreground hover:bg-muted transition-colors"
+              aria-label="Back"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+          )}
           <div className="h-10 w-10 rounded-2xl bg-primary/10 flex items-center justify-center border border-primary/15">
             <Home className="h-5 w-5 text-primary" />
           </div>
@@ -215,10 +220,6 @@ export default function FamilyWorkspacePage() {
             </p>
           </div>
         </div>
-        <p className="text-xs text-muted-foreground mt-3 leading-relaxed pl-1">
-          This home is for your household&apos;s health notes only. There are no public profiles, search, or open
-          connections—just explicit invites and approvals.
-        </p>
       </div>
 
       <div className="px-5 py-5 space-y-6 max-w-lg mx-auto">
@@ -367,10 +368,7 @@ export default function FamilyWorkspacePage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    No pending requests. When someone uses your workspace ID on the sign-up page, their request appears
-                    here for you to approve or decline.
-                  </p>
+                  <p className="text-[11px] text-muted-foreground">No pending requests.</p>
                 )}
               </section>
             ) : null}
@@ -442,7 +440,7 @@ export default function FamilyWorkspacePage() {
                       <div key={ev.id} className="px-3 py-2.5 text-[11px] bg-card/30">
                         <p className="text-foreground/90">
                           <span className="font-medium">{ev.contributorName}</span>{" "}
-                          <span className="text-muted-foreground">{ev.action.replace(/\./g, " · ")}</span>
+                          <span className="text-muted-foreground">{formatActivityAction(ev.action)}</span>
                         </p>
                         <p className="text-[10px] text-muted-foreground mt-0.5">
                           {new Date(ev.timestamp).toLocaleString()}
@@ -486,27 +484,27 @@ export default function FamilyWorkspacePage() {
               </div>
             </details>
 
-            <div className="rounded-2xl border border-primary/15 bg-primary/5 p-4">
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                <span className="font-medium text-foreground">Your workspace ID</span> (share only with people you
-                trust).{" "}
-                <button
-                  type="button"
-                  title="Click to copy family ID"
-                  onClick={() => {
-                    const id = user?.familyId;
-                    if (!id) return;
-                    void navigator.clipboard
-                      .writeText(id)
-                      .then(() => toast.success("Family ID copied"))
-                      .catch(() => toast.error("Could not copy"));
-                  }}
-                  className="font-mono text-xs text-foreground select-all rounded-lg px-2 py-1 align-baseline -mx-0.5 hover:bg-primary/10 border border-transparent hover:border-primary/20 transition-colors cursor-pointer text-left break-all"
-                >
-                  {user?.familyId}
-                </button>
+            <details className="rounded-2xl border border-border/40 bg-muted/15 p-3">
+              <summary className="text-xs font-medium text-foreground cursor-pointer">Advanced · family invite code</summary>
+              <p className="text-[11px] text-muted-foreground leading-relaxed mt-2">
+                Share this only with people you trust. They need it when sending a join request.
               </p>
-            </div>
+              <button
+                type="button"
+                title="Copy family invite code"
+                onClick={() => {
+                  const id = user?.familyId;
+                  if (!id) return;
+                  void navigator.clipboard
+                    .writeText(id)
+                    .then(() => toast.success("Code copied"))
+                    .catch(() => toast.error("Could not copy"));
+                }}
+                className="mt-2 font-sans tabular-nums tracking-tight text-xs text-foreground select-all rounded-lg px-2 py-1.5 w-full text-left hover:bg-primary/10 border border-border/50 transition-colors"
+              >
+                {user?.familyId}
+              </button>
+            </details>
           </>
         )}
       </div>

@@ -26,6 +26,9 @@ import { toastFromCaughtError } from "@/lib/toast-errors";
 import type { DoctorSummaryDocument } from "@/types/doctor-summary";
 import type { CareGuidanceItem } from "@/types/care-guidance";
 import { formatEvidenceLogLabel } from "@/lib/evidence-log-label";
+import { CopyHint } from "@/components/CopyHint";
+import { OBSERVATIONAL_NOT_DIAGNOSIS } from "@/lib/disclaimer-copy";
+import { gentleReminderImportance } from "@/lib/reminder-copy";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -64,6 +67,16 @@ type TimelineNarrativeEvent = {
   sourceLogIds: string[];
 };
 
+function healthStoryBeatLabel(stage: TimelineNarrativeEvent["stage"]): string {
+  const labels: Record<TimelineNarrativeEvent["stage"], string> = {
+    onset: "New",
+    progression: "Changing",
+    recurrence: "Comes back",
+    cluster: "Together"
+  };
+  return labels[stage] ?? stage;
+}
+
 function formatDateGroup(date: Date): string {
   if (isToday(date)) return "Today";
   if (isYesterday(date)) return "Yesterday";
@@ -81,7 +94,7 @@ const fadeUp = {
 };
 
 function careUrgencyClasses(urgency: CareGuidanceItem["urgency"]): string {
-  if (urgency === "high") return "bg-amber-500/10 text-amber-900 dark:text-amber-100 border-amber-500/25";
+  if (urgency === "high") return "bg-warning/15 text-warning-foreground border-warning/30";
   if (urgency === "moderate") return "bg-primary/8 text-primary border-primary/20";
   return "bg-muted/70 text-muted-foreground border-border/60";
 }
@@ -291,11 +304,11 @@ export default function MemberDetail() {
       `Relationship: ${member.relationship}`,
       `Generated: ${new Date().toLocaleString()}`,
       "",
-      "Recent Insights:",
+      "Recent patterns:",
       ...insights.slice(0, 6).map((ins) => {
         const how =
-          ins.source === "model" ? " AI narrative" : ins.source === "rules" ? " recurring phrase" : "";
-        return `- ${ins.title} (${ins.count} notes, ${ins.severity}${how})`;
+          ins.source === "model" ? " · From recent notes" : ins.source === "rules" ? " · From repeated wording" : "";
+        return `- ${ins.title} (${ins.count} notes, ${gentleReminderImportance(ins.severity)}${how})`;
       }),
       "",
       "Recent Logs:",
@@ -393,7 +406,7 @@ export default function MemberDetail() {
             onClick={openPrintableDoctorSummary}
             className="text-muted-foreground hover:text-foreground p-2 rounded-xl hover:bg-muted transition-colors text-xs"
             whileTap={{ scale: 0.9 }}
-            title="Print / Save PDF doctor summary"
+            title="Print or save visit summary"
           >
             PDF
           </motion.button>
@@ -427,9 +440,6 @@ export default function MemberDetail() {
             <Users className="h-3.5 w-3.5 text-muted-foreground" />
             <p className="text-xs font-semibold text-foreground">Care collaborators</p>
           </div>
-          <p className="text-[11px] text-muted-foreground leading-relaxed">
-            Shared timeline — everyone below can appear as a contributor on entries. Admins and contributors can assign the formal care team.
-          </p>
           <div className="flex flex-wrap gap-1.5">
             {timelineContributorIds.map((cid) => (
               <span
@@ -495,8 +505,7 @@ export default function MemberDetail() {
               >
                 <Sparkles className="h-3.5 w-3.5 text-insight" />
               </motion.div>
-              <span className="text-sm font-display font-semibold text-foreground">AI Insights</span>
-              <span className="text-xs text-muted-foreground">• Past 7 days</span>
+              <span className="text-sm font-display font-semibold text-foreground">Insights</span>
             </div>
             <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-hide">
               {insights.map((ins, i) => (
@@ -536,8 +545,7 @@ export default function MemberDetail() {
               <div className="h-6 w-6 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/15">
                 <Stethoscope className="h-3.5 w-3.5 text-primary" aria-hidden />
               </div>
-              <span className="text-sm font-display font-semibold text-foreground">Suggested care guidance</span>
-              <span className="text-xs text-muted-foreground">Patterns in notes</span>
+              <span className="text-sm font-display font-semibold text-foreground">Care guidance</span>
             </div>
             <div className="space-y-2.5">
               {memberCareGuidance.map((row, i) => (
@@ -584,7 +592,10 @@ export default function MemberDetail() {
                 </motion.div>
               ))}
             </div>
-            <p className="text-[10px] text-muted-foreground mt-3 leading-relaxed">{careGuidanceDisclaimer}</p>
+            <details className="mt-3 rounded-lg border border-border/40 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground">
+              <summary className="cursor-pointer font-medium text-foreground/80">Notice</summary>
+              <p className="mt-2 leading-relaxed">{careGuidanceDisclaimer}</p>
+            </details>
           </motion.div>
         )}
       </AnimatePresence>
@@ -592,9 +603,9 @@ export default function MemberDetail() {
       <div className="px-5 py-2">
         <div className="glass-card rounded-2xl p-4 border border-border/40 space-y-3 mb-3">
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-display font-semibold text-foreground">Doctor visit handoff</p>
-              <p className="section-subtitle">30-day observational snapshot for appointments (not a diagnosis)</p>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <p className="text-sm font-display font-semibold text-foreground">Visit summary</p>
+              <CopyHint label="What this is" content={OBSERVATIONAL_NOT_DIAGNOSIS} />
             </div>
             <button
               type="button"
@@ -616,20 +627,17 @@ export default function MemberDetail() {
               </ul>
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground">No doctor summary available yet.</p>
+            <p className="text-xs text-muted-foreground">No visit summary yet.</p>
           )}
         </div>
         <div className="glass-card rounded-2xl p-4 border border-border/40 space-y-3">
           <div className="flex items-center justify-between gap-3 mb-1">
-            <div>
-              <p className="text-sm font-display font-semibold text-foreground">Weekly Digest</p>
-              <p className="section-subtitle">Precomputed weekly trends and comparisons</p>
-            </div>
+            <p className="text-sm font-display font-semibold text-foreground">Weekly digest</p>
           </div>
           {digestsLoading ? (
-            <p className="text-xs text-muted-foreground">Loading digest...</p>
+            <p className="text-[11px] text-muted-foreground">Loading…</p>
           ) : digests.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No weekly digest available yet.</p>
+            <p className="text-[11px] text-muted-foreground">No digests yet.</p>
           ) : (
             <div className="space-y-3">
               {digests.slice(0, 4).map((digest, index) => {
@@ -718,21 +726,20 @@ export default function MemberDetail() {
 
       <div className="px-5 py-2">
         <div className="glass-card rounded-2xl p-4 border border-border/40 space-y-3">
-          <div>
-            <p className="text-sm font-display font-semibold text-foreground">Timeline Narrative</p>
-            <p className="text-xs text-muted-foreground">Chronological symptom progression events</p>
-          </div>
+          <p className="text-sm font-display font-semibold text-foreground">Health story</p>
           {timelineLoading ? (
-            <p className="text-xs text-muted-foreground">Building timeline narrative...</p>
+            <p className="text-[11px] text-muted-foreground">Loading…</p>
           ) : timelineEvents.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No timeline narrative events yet.</p>
+            <p className="text-[11px] text-muted-foreground">No events yet.</p>
           ) : (
             <div className="space-y-2">
               {timelineEvents.slice(0, 8).map((event) => (
                 <div key={event.id} className="rounded-xl border border-border/40 bg-muted/30 px-3 py-2 interactive-row">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-semibold text-foreground">{event.title}</p>
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{event.stage}</span>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      {healthStoryBeatLabel(event.stage)}
+                    </span>
                   </div>
                   <p className="text-[11px] text-muted-foreground mt-1">{event.description}</p>
                   <p className="text-[10px] text-muted-foreground mt-1">
@@ -764,7 +771,7 @@ export default function MemberDetail() {
       <div className="px-5 py-4">
         {pendingVoice && (
           <div className="mb-3 text-[11px] text-warning bg-warning/10 border border-warning/25 rounded-xl px-3 py-2 flex items-center justify-between gap-2">
-            <span>Voice transcription is still processing. This timeline updates automatically.</span>
+            <span>Voice note still processing — updates automatically.</span>
             <span className="text-warning/80">{lastUpdatedText}</span>
           </div>
         )}
@@ -903,22 +910,7 @@ export default function MemberDetail() {
         ))}
 
         {logs.length === 0 && (
-          <motion.div
-            className="text-center py-20 glass-card rounded-2xl"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-          >
-            <div className="doc-stack mb-4">
-              <span />
-              <span />
-              <span>
-                <FileText className="h-6 w-6 text-muted-foreground/45" />
-              </span>
-            </div>
-            <p className="text-foreground font-display font-semibold">No logs yet</p>
-            <p className="text-xs text-muted-foreground mt-1">Tap + to add the first observation</p>
-          </motion.div>
+          <p className="text-center text-[11px] text-muted-foreground py-8">No observations yet — tap + when you’re ready.</p>
         )}
       </div>
 

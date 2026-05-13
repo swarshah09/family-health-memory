@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Heart, ArrowRight } from "lucide-react";
 import { AppRequestError, toastError, toastFromCaughtError } from "@/lib/toast-errors";
 import { displayRoleLabel } from "@/lib/collaboration-roles";
+import { ThemeAppearanceControl } from "@/components/ThemeAppearanceControl";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -85,8 +86,11 @@ export default function AcceptInvitePage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-6 bg-[#0d3a34]">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-card/95 p-6 shadow-xl backdrop-blur">
+    <div className="relative min-h-screen flex flex-col items-center justify-center px-4 py-6 bg-background mesh-bg">
+      <div className="absolute right-3 top-3 z-10 hidden sm:block">
+        <ThemeAppearanceControl />
+      </div>
+      <div className="w-full max-w-md rounded-2xl border border-border/60 bg-card/95 p-6 shadow-soft-lg backdrop-blur-sm">
         <div className="flex items-center gap-3 mb-4">
           <div className="h-10 w-10 rounded-xl bg-primary/15 flex items-center justify-center">
             <Heart className="h-5 w-5 text-primary" />
