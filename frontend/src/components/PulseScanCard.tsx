@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { analyzePPGBuffer } from "@/lib/pulseScan/ppg";
+import { disableTorch, enableTorchRobust, getVideoStreamPreferTorch } from "@/lib/pulseScan/torch";
 import { useApp } from "@/context/AppContext";
 import { Camera, Heart, Loader2 } from "lucide-react";
 
@@ -8,16 +9,6 @@ const SCAN_TARGET_SEC = 36;
 const MIN_SAMPLE_INTERVAL_MS = 1000 / 26;
 
 type Phase = "idle" | "scanning" | "processing" | "done" | "error";
-
-async function setTorch(track: MediaStreamTrack, on: boolean): Promise<void> {
-  try {
-    const caps = track.getCapabilities?.() as { torch?: boolean } | undefined;
-    if (!caps?.torch) return;
-    await track.applyConstraints({ advanced: [{ torch: on } as MediaTrackConstraintSet] });
-  } catch {
-    /* torch unsupported or denied */
-  }
-}
 
 type PulseScanCardProps = {
   memberId: string | undefined;
@@ -43,12 +34,13 @@ export default function PulseScanCard({ memberId, memberLabel }: PulseScanCardPr
     capturedAt: string;
   } | null>(null);
   const [lastWaveform, setLastWaveform] = useState<number[] | null>(null);
+  const [torchNote, setTorchNote] = useState<string | null>(null);
 
   const stopStream = useCallback(() => {
     const s = streamRef.current;
     if (s) {
       const t = s.getVideoTracks()[0];
-      if (t) void setTorch(t, false);
+      void disableTorch(t);
       s.getTracks().forEach((tr) => tr.stop());
     }
     streamRef.current = null;
@@ -95,6 +87,7 @@ export default function PulseScanCard({ memberId, memberLabel }: PulseScanCardPr
     }
 
     setError(null);
+    setTorchNote(null);
     setPhase("scanning");
     setProgress(0);
     samplesRef.current = [];
@@ -103,14 +96,7 @@ export default function PulseScanCard({ memberId, memberLabel }: PulseScanCardPr
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 640 },
-          height: { ideal: 480 }
-        },
-        audio: false
-      });
+      stream = await getVideoStreamPreferTorch();
     } catch {
       setError("We could not open the camera. Check permissions and try again.");
       setPhase("error");
@@ -119,16 +105,20 @@ export default function PulseScanCard({ memberId, memberLabel }: PulseScanCardPr
 
     streamRef.current = stream;
     const track = stream.getVideoTracks()[0];
-    await setTorch(track, true);
-
     const v = videoRef.current;
-    if (v) {
-      v.srcObject = stream;
-      try {
-        await v.play();
-      } catch {
-        /* autoplay policies */
-      }
+    if (!v || !track) {
+      stopStream();
+      setError("Could not attach the camera preview.");
+      setPhase("error");
+      return;
+    }
+
+    v.srcObject = stream;
+    const torchOk = await enableTorchRobust(track, v);
+    if (!torchOk) {
+      setTorchNote(
+        "We could not turn on the flash from the browser. The scan can still work — try a dimmer room, steady pressure, and Chrome on Android. iPhone Safari usually cannot control the flash for websites."
+      );
     }
 
     const canvas = canvasRef.current;
@@ -269,6 +259,7 @@ export default function PulseScanCard({ memberId, memberLabel }: PulseScanCardPr
                 />
               </div>
               <p className="text-[11px] text-muted-foreground">Cover both the lens and the flash if your phone has one.</p>
+              {torchNote ? <p className="text-[11px] leading-snug text-muted-foreground/95">{torchNote}</p> : null}
             </div>
           )}
           {phase === "processing" && (
