@@ -101,7 +101,7 @@ export default function MemorySearchPage() {
               <MessageCircle className="h-4 w-4 text-insight" />
             </div>
             <h1 className="font-display font-bold text-foreground text-lg">Ask your memory</h1>
-            <CopyHint label="About this search" content={MEMORY_SEARCH_DISCLAIMER} />
+            <CopyHint label="About this search">{MEMORY_SEARCH_DISCLAIMER}</CopyHint>
           </div>
         </div>
         <div className="mt-4 flex flex-col sm:flex-row gap-2 sm:items-center">

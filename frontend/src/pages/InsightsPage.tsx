@@ -102,7 +102,9 @@ export default function InsightsPage() {
               <Sparkles className="h-4 w-4 text-white" aria-hidden />
             </div>
             <h1 className="font-display font-bold text-white text-lg">Family insights</h1>
-            <CopyHint label="About these insights" content={INSIGHTS_NON_CLINICAL} className="text-white/80 hover:bg-white/15 hover:text-white" />
+            <CopyHint label="About these insights" className="text-white/80 hover:bg-white/15 hover:text-white">
+              {INSIGHTS_NON_CLINICAL}
+            </CopyHint>
           </div>
         </div>
       </motion.div>
@@ -159,7 +161,7 @@ export default function InsightsPage() {
               <Stethoscope className="h-4 w-4 text-primary" aria-hidden />
             </div>
             <h2 className="text-sm font-display font-semibold text-foreground">Care guidance</h2>
-            <CopyHint label="About care guidance" content={CARE_GUIDANCE_ROUTING} />
+            <CopyHint label="About care guidance">{CARE_GUIDANCE_ROUTING}</CopyHint>
           </div>
 
           {careGuidanceItems.length === 0 ? (

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { analyzePPGBuffer } from "@/lib/pulseScan/ppg";
+import { analyzePPGBuffer, type PpgSample } from "@/lib/pulseScan/ppg";
 import { disableTorch, enableTorchRobust, getVideoStreamPreferTorch } from "@/lib/pulseScan/torch";
 import { useApp } from "@/context/AppContext";
 import { Camera, Heart, Loader2 } from "lucide-react";
 
-const SCAN_TARGET_SEC = 36;
-const MIN_SAMPLE_INTERVAL_MS = 1000 / 26;
+const SCAN_TARGET_SEC = 42;
+const MIN_SAMPLE_INTERVAL_MS = 1000 / 32;
 
 type Phase = "idle" | "scanning" | "processing" | "done" | "error";
 
@@ -21,7 +21,7 @@ export default function PulseScanCard({ memberId, memberLabel }: PulseScanCardPr
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number>(0);
-  const samplesRef = useRef<number[]>([]);
+  const samplesRef = useRef<PpgSample[]>([]);
   const t0Ref = useRef<number>(0);
   const lastSampleRef = useRef<number>(0);
 
@@ -147,7 +147,7 @@ export default function PulseScanCard({ memberId, memberLabel }: PulseScanCardPr
         const raw = samplesRef.current;
         setPhase("processing");
 
-        const result = analyzePPGBuffer(raw, durationSec);
+        const result = analyzePPGBuffer(raw);
         const capturedAt = new Date().toISOString();
 
         void (async () => {
@@ -183,7 +183,7 @@ export default function PulseScanCard({ memberId, memberLabel }: PulseScanCardPr
         const w = vid.videoWidth;
         const h = vid.videoHeight;
         if (w > 0 && h > 0) {
-          const side = 48;
+          const side = 96;
           canvas.width = side;
           canvas.height = side;
           ctx.drawImage(vid, (w - side) / 2, (h - side) / 2, side, side, 0, 0, side, side);
@@ -194,10 +194,11 @@ export default function PulseScanCard({ memberId, memberLabel }: PulseScanCardPr
             const r = img[p]!;
             const g = img[p + 1]!;
             const b = img[p + 2]!;
-            sum += 0.59 * g + 0.3 * r + 0.11 * b;
+            /* Red-weighted: stronger AC component with fingertip + LED / flash. */
+            sum += 0.62 * r + 0.28 * g + 0.1 * b;
           }
           const px = img.length / (4 * 2);
-          samplesRef.current.push(sum / Math.max(1, px));
+          samplesRef.current.push({ t: now, v: sum / Math.max(1, px) });
         }
       }
 

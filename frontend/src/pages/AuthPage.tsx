@@ -340,7 +340,7 @@ export default function AuthPage() {
           <p className="mt-8 text-center text-sm text-muted-foreground">
             {mode === "login" ? (
               <>
-                New to Family Memory?{" "}
+                New to Family Health Memory?{" "}
                 <button
                   type="button"
                   onClick={() => setMode("signup")}

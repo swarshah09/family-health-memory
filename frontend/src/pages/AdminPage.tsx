@@ -133,6 +133,34 @@ export default function AdminPage() {
     [members]
   );
 
+  const filteredUsers = useMemo(() => {
+    const q = teamQuery.trim().toLowerCase();
+    if (!q) return familyUsers;
+    return familyUsers.filter(
+      (u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.role.includes(q)
+    );
+  }, [familyUsers, teamQuery]);
+
+  const filteredMembers = useMemo(() => {
+    const q = memberQuery.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter(
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        m.relationship.toLowerCase().includes(q) ||
+        (m.notes || "").toLowerCase().includes(q)
+    );
+  }, [members, memberQuery]);
+
+  const filteredNotifications = useMemo(() => {
+    const q = alertQuery.trim().toLowerCase();
+    if (!q) return notifications;
+    return notifications.filter((n) => {
+      const label = gentleReminderImportance(n.severity).toLowerCase();
+      return n.message.toLowerCase().includes(q) || label.includes(q);
+    });
+  }, [notifications, alertQuery]);
+
   const fetchAutomation = async () => {
     if (!user || !token) return;
     const headers = { Authorization: `Bearer ${token}` };
@@ -320,34 +348,6 @@ export default function AdminPage() {
     if (!response.ok) return;
     setNotifications((prev) => prev.map((n) => (n.id === notificationId ? { ...n, isRead: true } : n)));
   };
-
-  const filteredUsers = useMemo(() => {
-    const q = teamQuery.trim().toLowerCase();
-    if (!q) return familyUsers;
-    return familyUsers.filter(
-      (u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.role.includes(q)
-    );
-  }, [familyUsers, teamQuery]);
-
-  const filteredMembers = useMemo(() => {
-    const q = memberQuery.trim().toLowerCase();
-    if (!q) return members;
-    return members.filter(
-      (m) =>
-        m.name.toLowerCase().includes(q) ||
-        m.relationship.toLowerCase().includes(q) ||
-        (m.notes || "").toLowerCase().includes(q)
-    );
-  }, [members, memberQuery]);
-
-  const filteredNotifications = useMemo(() => {
-    const q = alertQuery.trim().toLowerCase();
-    if (!q) return notifications;
-    return notifications.filter((n) => {
-      const label = gentleReminderImportance(n.severity).toLowerCase();
-      return n.message.toLowerCase().includes(q) || label.includes(q);
-    });
-  }, [notifications, alertQuery]);
 
   const confirmRoleChange = () => {
     if (!pendingRoleChange || updatingRole) return;
@@ -634,11 +634,15 @@ export default function AdminPage() {
                   .then((result) => {
                     setInviteName("");
                     setInviteEmail("");
-                    toast.success("User invited", {
-                      description: result.temporaryPassword
-                        ? `Temporary password: ${result.temporaryPassword}`
-                        : "Existing family user updated."
-                    });
+                    if (result.kind === "pending") {
+                      toast.success("Invitation sent", {
+                        description: "They will receive an email with a link to accept and join your workspace."
+                      });
+                    } else {
+                      toast.success("User added", {
+                        description: "They can sign in with their existing account."
+                      });
+                    }
                   })
                   .catch((err: unknown) =>
                     toastFromCaughtError(

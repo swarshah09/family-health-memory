@@ -142,31 +142,19 @@ export default function MemberDetail() {
     if (user?.familyId) loadFamilyUsers().catch(() => {});
   }, [user?.familyId]);
 
-  const member = members.find((m) => m.id === id);
-  if (!member)
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">Member not found</p>
-      </div>
-    );
-
-  const logs = getLogsForMember(member.id);
-  const insights = getInsightsForMember(member.id);
-  const memberCareGuidance = getCareGuidanceForMember(member.id);
-  const pendingVoice = hasPendingVoiceLogs(member.id);
   const token = localStorage.getItem("fhm_access_token");
   const selectedLogIdFromUrl = searchParams.get("logId");
-  const canManage = isHeadUser(user);
-  const canAddLog = canCreateHealthLogs(user);
-
-  const contributorLabel = (contributorId: string) =>
-    familyUsers.find((u) => u.id === contributorId)?.name || "Teammate";
-
-  const timelineContributorIds = [...new Set(logs.map((l) => l.contributorId))];
+  const member = members.find((m) => m.id === id);
+  const routeMemberId = id ?? "";
+  const memberLogCount = routeMemberId ? getLogsForMember(routeMemberId).length : 0;
+  const pendingVoice = routeMemberId ? hasPendingVoiceLogs(routeMemberId) : false;
 
   useEffect(() => {
-    setCareSelection((member.careCollaborators || []).map((c) => c.userId));
-  }, [member.id, member.careCollaborators?.map((c) => c.userId).join(",")]);
+    if (!routeMemberId) return;
+    const m = members.find((x) => x.id === routeMemberId);
+    if (!m) return;
+    setCareSelection((m.careCollaborators || []).map((c) => c.userId));
+  }, [routeMemberId, members]);
 
   useEffect(() => {
     if (!pendingVoice) return;
@@ -189,9 +177,9 @@ export default function MemberDetail() {
   }, [selectedLogIdFromUrl, searchParams, setSearchParams]);
 
   useEffect(() => {
-    if (!user?.id || !token) return;
+    if (!user?.id || !token || !routeMemberId) return;
     setDigestsLoading(true);
-    fetch(`${API_BASE_URL}/api/digests/${user.id}/${member.id}`, {
+    fetch(`${API_BASE_URL}/api/digests/${user.id}/${routeMemberId}`, {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(async (response) => {
@@ -203,12 +191,12 @@ export default function MemberDetail() {
         setDigests([]);
       })
       .finally(() => setDigestsLoading(false));
-  }, [user?.id, member.id, token]);
+  }, [user?.id, routeMemberId, token]);
 
   useEffect(() => {
-    if (!user?.familyId || !token) return;
+    if (!user?.familyId || !token || !routeMemberId) return;
     setTimelineLoading(true);
-    fetch(`${API_BASE_URL}/api/families/${user.familyId}/timeline/${member.id}`, {
+    fetch(`${API_BASE_URL}/api/families/${user.familyId}/timeline/${routeMemberId}`, {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(async (response) => {
@@ -220,12 +208,12 @@ export default function MemberDetail() {
         setTimelineEvents([]);
       })
       .finally(() => setTimelineLoading(false));
-  }, [user?.familyId, member.id, token, logs.length]);
+  }, [user?.familyId, routeMemberId, token, memberLogCount]);
 
   useEffect(() => {
-    if (!user?.familyId || !token) return;
+    if (!user?.familyId || !token || !routeMemberId) return;
     setDoctorSummaryLoading(true);
-    fetch(`${API_BASE_URL}/api/families/${user.familyId}/doctor-summary/${member.id}?days=30`, {
+    fetch(`${API_BASE_URL}/api/families/${user.familyId}/doctor-summary/${routeMemberId}?days=30`, {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(async (response) => {
@@ -235,7 +223,25 @@ export default function MemberDetail() {
       })
       .catch(() => setDoctorSummary(null))
       .finally(() => setDoctorSummaryLoading(false));
-  }, [user?.familyId, member.id, token, logs.length]);
+  }, [user?.familyId, routeMemberId, token, memberLogCount]);
+
+  if (!member)
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Member not found</p>
+      </div>
+    );
+
+  const logs = getLogsForMember(member.id);
+  const insights = getInsightsForMember(member.id);
+  const memberCareGuidance = getCareGuidanceForMember(member.id);
+  const canManage = isHeadUser(user);
+  const canAddLog = canCreateHealthLogs(user);
+
+  const contributorLabel = (contributorId: string) =>
+    familyUsers.find((u) => u.id === contributorId)?.name || "Teammate";
+
+  const timelineContributorIds = [...new Set(logs.map((l) => l.contributorId))];
 
   const lastUpdatedText = (() => {
     if (!lastDataRefreshAt) return "sync pending";
@@ -605,7 +611,7 @@ export default function MemberDetail() {
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-1.5 min-w-0">
               <p className="text-sm font-display font-semibold text-foreground">Visit summary</p>
-              <CopyHint label="What this is" content={OBSERVATIONAL_NOT_DIAGNOSIS} />
+              <CopyHint label="What this is">{OBSERVATIONAL_NOT_DIAGNOSIS}</CopyHint>
             </div>
             <button
               type="button"

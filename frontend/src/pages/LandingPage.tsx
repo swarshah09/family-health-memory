@@ -80,7 +80,7 @@ function Nav() {
             f
           </span>
           <span className="font-serif-display text-lg font-semibold tracking-tight lowercase sm:text-xl">
-            family memory
+            family health memory
           </span>
         </Link>
         <nav className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
@@ -153,7 +153,7 @@ export default function LandingPage() {
               variants={fadeUp}
               className="mt-5 max-w-[26rem] font-sans text-[0.9375rem] font-normal leading-[1.65] text-muted-foreground sm:mt-6 sm:text-base sm:leading-[1.7]"
             >
-              Family Memory weaves together small observations, voice notes and vitals into a calm, intelligent
+              Family Health Memory weaves together small observations, voice notes and vitals into a calm, intelligent
               timeline — so the people you love are never seen in fragments again.
             </motion.p>
             <motion.div variants={fadeUp} className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -360,7 +360,7 @@ export default function LandingPage() {
           <blockquote className="font-serif-display mt-8 text-2xl font-medium leading-snug text-primary sm:text-3xl">
             When my father was sick, three of us were caring for him from three cities. We were each holding a corner of
             the same blanket — and dropping pieces.{" "}
-            <span className="text-primary">Family Memory is the loom.</span>
+            <span className="text-primary">Family Health Memory is the loom.</span>
           </blockquote>
           <p className="overline mt-10 text-muted-foreground">— Priya, Bengaluru · daughter of two</p>
         </section>
@@ -398,7 +398,7 @@ export default function LandingPage() {
 
       <footer className="border-t border-border/50 py-8">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-4 text-xs text-muted-foreground sm:flex-row sm:px-6 lg:px-8">
-          <p>© {new Date().getFullYear()} Family Memory · A quiet companion for caregiving households.</p>
+          <p>© {new Date().getFullYear()} Family Health Memory · A quiet companion for caregiving households.</p>
           <p>Built with care</p>
         </div>
       </footer>

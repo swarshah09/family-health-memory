@@ -25,7 +25,7 @@ export default function AppSidebar() {
           <Heart className="h-5 w-5" fill="currentColor" aria-hidden />
         </div>
         <div className="min-w-0">
-          <p className="font-display text-sm font-bold tracking-tight text-foreground">Family Memory</p>
+          <p className="font-display text-sm font-bold tracking-tight text-foreground">Family Health Memory</p>
           <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Private workspace</p>
         </div>
       </div>

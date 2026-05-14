@@ -18,100 +18,7 @@ import AddLogDialog from "@/components/AddLogDialog";
 import PulseScanCard from "@/components/PulseScanCard";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
-import {
-  deltaFromSeries,
-  extractLatestGlucose,
-  extractLatestGlucoseFromVitals,
-  glucoseSeriesFromLogs,
-  glucoseSeriesFromVitals,
-  medicationAdherenceFromSlots,
-  medicationAdherenceHeuristic,
-  medicationSubtitleFromMember,
-  rolling7LocalDayLetters,
-  sortLogsNewestFirst
-} from "../lib/dashboard-from-logs";
-
-function Sparkline({ series, tone }: { series: number[]; tone: "sage" | "amber" }) {
-  const w = 320;
-  const h = 52;
-  const max = Math.max(...series, 1);
-  const min = Math.min(...series, 0);
-  const span = max - min || 1;
-  const pad = 4;
-  const pts = series.map((v, i) => {
-    const x = pad + (i / Math.max(series.length - 1, 1)) * (w - pad * 2);
-    const y = pad + (1 - (v - min) / span) * (h - pad * 2);
-    return `${x},${y}`;
-  });
-  const fillPts = `0,${h} ${pts.join(" ")} ${w},${h}`;
-  const strokeColor =
-    tone === "amber" ? "hsl(var(--accent))" : "hsl(var(--primary) / 0.85)";
-  const fillId = tone === "amber" ? "sparkFillAmber" : "sparkFillSage";
-
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-14 w-full max-w-full" preserveAspectRatio="none" aria-hidden>
-      <defs>
-        <linearGradient id={fillId} x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={strokeColor} stopOpacity="0.35" />
-          <stop offset="100%" stopColor={strokeColor} stopOpacity="0.02" />
-        </linearGradient>
-      </defs>
-      <polygon points={fillPts} fill={`url(#${fillId})`} />
-      <polyline
-        fill="none"
-        stroke={strokeColor}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        points={pts.join(" ")}
-      />
-    </svg>
-  );
-}
-
-function adherencePillClass(s: "ok" | "bad" | "pending") {
-  return cn(
-    "h-7 min-w-0 flex-1 rounded-md sm:h-8",
-    s === "ok" && "bg-primary/40 dark:bg-primary/35",
-    s === "bad" && "bg-rose-200/90 dark:bg-rose-900/50",
-    s === "pending" && "bg-muted/55 dark:bg-muted/40"
-  );
-}
-
-/** Seven columns: two slots per day, one weekday label centered under each pair. */
-function AdherencePills({
-  missed,
-  cellStatuses
-}: {
-  missed?: number;
-  cellStatuses?: Array<"ok" | "bad" | "pending">;
-}) {
-  const cells = 14;
-  const dayLetters = rolling7LocalDayLetters();
-  let statuses: Array<"ok" | "bad" | "pending">;
-  if (cellStatuses && cellStatuses.length === cells) {
-    statuses = cellStatuses;
-  } else {
-    const bad = Math.min(missed ?? 0, cells);
-    const ok = Math.max(0, cells - bad);
-    statuses = Array.from({ length: cells }, (_, i) => (i < ok ? "ok" : "bad"));
-  }
-  return (
-    <div className="grid grid-cols-7 gap-x-1 sm:gap-x-1.5">
-      {dayLetters.map((letter, dayIdx) => (
-        <div key={`${letter}-${dayIdx}`} className="flex min-w-0 flex-col items-center gap-1.5">
-          <div className="flex w-full min-w-0 gap-0.5 sm:gap-1">
-            <div className={adherencePillClass(statuses[dayIdx * 2])} />
-            <div className={adherencePillClass(statuses[dayIdx * 2 + 1])} />
-          </div>
-          <span className="text-center text-[9px] font-semibold uppercase tracking-tighter text-muted-foreground">
-            {letter}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
+import { sortLogsNewestFirst } from "../lib/dashboard-from-logs";
 
 export default function Dashboard() {
   const {
@@ -123,9 +30,7 @@ export default function Dashboard() {
     pendingJoinInboxCount,
     workspaceName,
     workspaceTagline,
-    dashboardPeopleFilterId,
-    vitalReadings,
-    medicationSlots
+    dashboardPeopleFilterId
   } = useApp();
   const navigate = useNavigate();
   const [showAddMember, setShowAddMember] = useState(false);
@@ -172,32 +77,10 @@ export default function Dashboard() {
 
   const workspaceTitle = workspaceName?.trim() || user?.familyName?.trim() || "Your family";
 
-  const metricMembers = useMemo(() => {
+  const pulseScanMember = useMemo(() => {
     const list = filteredMembers.length ? filteredMembers : trackedMembers;
-    const a = list[0];
-    const b = list[1] ?? list[0];
-    return { bp: a, sugar: b !== a ? b : list[0] };
+    return list[0];
   }, [filteredMembers, trackedMembers]);
-
-  const sugarLogs = metricMembers.sugar ? getLogsForMember(metricMembers.sugar.id) : [];
-
-  const sugarReading =
-    (metricMembers.sugar ? extractLatestGlucoseFromVitals(vitalReadings, metricMembers.sugar.id) : null) ??
-    extractLatestGlucose(sugarLogs);
-  const sugarSeriesApi = metricMembers.sugar
-    ? glucoseSeriesFromVitals(vitalReadings, metricMembers.sugar.id)
-    : [0, 0, 0, 0, 0, 0, 0];
-  const sugarSeries = sugarSeriesApi.some((v) => v > 0) ? sugarSeriesApi : glucoseSeriesFromLogs(sugarLogs);
-  const sugarDelta = deltaFromSeries(sugarSeries);
-
-  const adherenceMember = filteredMembers[0] ?? trackedMembers[0];
-  const slotAdherence = adherenceMember
-    ? medicationAdherenceFromSlots(medicationSlots, adherenceMember.id)
-    : null;
-  const heuristicAdherence = medicationAdherenceHeuristic(filteredLogs.length ? filteredLogs : logs);
-  const useSlotAdherence = slotAdherence?.fromApi === true;
-  const adherencePct = useSlotAdherence ? slotAdherence.pct : heuristicAdherence.pct;
-  const medSubtitle = medicationSubtitleFromMember(adherenceMember?.notes, adherenceMember?.name);
 
   const inactiveMembersLabel = useMemo(() => {
     const list = filteredMembers.length ? filteredMembers : trackedMembers;
@@ -330,7 +213,7 @@ export default function Dashboard() {
       </div>
 
       <div className="mx-auto max-w-[min(88rem,calc(100%-1.5rem))] space-y-6 px-4 py-8 sm:px-6 lg:space-y-8 lg:px-8 lg:py-10">
-        {/* Top grid: weather + vitals */}
+        {/* Top grid: weather + pulse scan */}
         <div className="grid gap-4 lg:grid-cols-12 lg:gap-5">
           <motion.section
             className="chronicle-card flex flex-col justify-between rounded-[1.75rem] p-6 sm:p-7 lg:col-span-6 lg:min-h-[17.5rem]"
@@ -361,84 +244,21 @@ export default function Dashboard() {
           </motion.section>
 
           <motion.div
-            className="lg:col-span-3"
+            className="lg:col-span-6"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35, delay: 0.05 }}
           >
             <PulseScanCard
-              memberId={metricMembers.bp?.id}
+              memberId={pulseScanMember?.id}
               memberLabel={
-                metricMembers.bp
-                  ? `${metricMembers.bp.name} (${metricMembers.bp.relationship})`
+                pulseScanMember
+                  ? `${pulseScanMember.name} (${pulseScanMember.relationship})`
                   : "Your family"
               }
             />
           </motion.div>
-
-          <motion.div
-            className="chronicle-card flex flex-col rounded-[1.75rem] p-5 sm:p-6 lg:col-span-3"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, delay: 0.1 }}
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Fasting sugar</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {metricMembers.sugar?.name} ({metricMembers.sugar?.relationship})
-            </p>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="font-serif-display text-3xl font-semibold tabular-nums text-foreground sm:text-4xl">
-                {sugarReading ?? "—"}
-              </span>
-              <span className="text-sm text-muted-foreground">mg/dL</span>
-              {sugarDelta != null && sugarDelta !== 0 && (
-                <span
-                  className={cn(
-                    "ml-auto rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums",
-                    sugarDelta > 0 ? "bg-accent/15 text-accent" : "bg-primary/12 text-primary"
-                  )}
-                >
-                  {sugarDelta > 0 ? `+${sugarDelta}` : sugarDelta}
-                </span>
-              )}
-            </div>
-            <div className="mt-4 flex-1 min-h-[3.5rem]">
-              <Sparkline series={sugarSeries} tone="sage" />
-            </div>
-            {!sugarReading && (
-              <p className="mt-2 text-[11px] text-muted-foreground">Log a value like &quot;110 mg/dL&quot; in an observation.</p>
-            )}
-          </motion.div>
         </div>
-
-        {/* Medication adherence */}
-        <motion.section
-          className="chronicle-card rounded-[1.75rem] p-6 sm:p-7"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.08 }}
-        >
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                Medication adherence · 7 days
-              </p>
-              <p className="mt-2 font-serif-display text-3xl font-semibold tabular-nums text-foreground sm:text-4xl">
-                {adherencePct}% on time
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Inferred from medication-tagged notes — not a clinical device.
-              </p>
-            </div>
-            <p className="max-w-xs text-right text-xs leading-relaxed text-muted-foreground sm:text-sm">{medSubtitle}</p>
-          </div>
-          <div className="mt-6">
-            <AdherencePills
-              missed={useSlotAdherence ? undefined : heuristicAdherence.missedSlots}
-              cellStatuses={useSlotAdherence ? slotAdherence.cellStatuses : undefined}
-            />
-          </div>
-        </motion.section>
 
         {/* Timeline + insights */}
         <div className="grid gap-6 lg:grid-cols-12 lg:gap-8">
