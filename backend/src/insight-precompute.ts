@@ -1,7 +1,13 @@
 import { generateGeminiInsights } from "./gemini.js";
 import { PrecomputedInsightModel, UserModel, WeeklyDigestModel } from "./models.js";
 import { generateInsights } from "./patterns.js";
-import { listLogs, listMembers, listTimelineNarrativeEvents, listLatestPrecomputedInsightsForFamily } from "./store.js";
+import {
+  listLogs,
+  listMembers,
+  listTimelineNarrativeEvents,
+  listLatestPrecomputedInsightsForFamily,
+  listWellnessPulseSessionsForMember
+} from "./store.js";
 import { Insight } from "./types.js";
 import { createWeeklyDigest } from "./weekly-digest.js";
 
@@ -37,7 +43,29 @@ export async function precomputeInsightsForUser(userId: string): Promise<void> {
       const ruleInsights = generateInsights(familyId, member.id, member.name, memberLogs);
       let modelInsights: Insight[] = [];
       try {
-        modelInsights = await generateGeminiInsights(familyId, member.id, member.name, memberLogs);
+        const wellnessRows = await listWellnessPulseSessionsForMember(familyId, member.id, {
+          limit: 24,
+          sinceDays: 45
+        });
+        const wellnessPulseContext =
+          wellnessRows.length === 0
+            ? undefined
+            : [
+                "Pulse Scan / Heart Rhythm Snapshot sessions (approximate pulse only).",
+                ...wellnessRows.map(
+                  (w) =>
+                    `${w.capturedAt.slice(0, 16)}: ~${Math.round(w.heartRate)} bpm, signal quality ~${Math.round(
+                      w.signalConfidence * 100
+                    )}%, duration ${w.sessionDurationSec}s`
+                )
+              ].join("\n");
+        modelInsights = await generateGeminiInsights(
+          familyId,
+          member.id,
+          member.name,
+          memberLogs,
+          wellnessPulseContext
+        );
       } catch (error) {
         console.error("AI generation failed for user/member", { userId, memberId: member.id, error });
       }

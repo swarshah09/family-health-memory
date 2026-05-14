@@ -21,6 +21,8 @@ const familyWorkspaceSchema = new Schema(
   {
     familyId: { type: String, required: true, unique: true, index: true },
     name: { type: String, required: true },
+    /** Optional short line under the workspace name in the UI (Chronicle-style). */
+    tagline: { type: String, required: false, maxlength: 160 },
     createdByUserId: { type: String, required: true, index: true }
   },
   { timestamps: true }
@@ -152,6 +154,54 @@ const healthLogSchema = new Schema(
   },
   { timestamps: true }
 );
+
+const vitalReadingSchema = new Schema(
+  {
+    familyId: { type: String, required: true, index: true },
+    memberId: { type: String, required: true, index: true },
+    kind: { type: String, enum: ["blood_pressure", "glucose"], required: true, index: true },
+    systolic: { type: Number },
+    diastolic: { type: Number },
+    mgDl: { type: Number },
+    recordedAt: { type: Date, required: true, index: true },
+    createdByUserId: { type: String, index: true }
+  },
+  { timestamps: true, collection: "vital_readings" }
+);
+vitalReadingSchema.index({ familyId: 1, memberId: 1, recordedAt: -1 });
+
+const medicationSlotSchema = new Schema(
+  {
+    familyId: { type: String, required: true, index: true },
+    memberId: { type: String, required: true, index: true },
+    dayKey: { type: String, required: true },
+    slotHalf: { type: Number, enum: [0, 1], required: true },
+    status: {
+      type: String,
+      enum: ["taken", "missed", "late", "pending"],
+      required: true,
+      default: "pending",
+      index: true
+    }
+  },
+  { timestamps: true, collection: "medication_slots" }
+);
+medicationSlotSchema.index({ familyId: 1, memberId: 1, dayKey: 1, slotHalf: 1 }, { unique: true });
+
+const wellnessPulseSessionSchema = new Schema(
+  {
+    familyId: { type: String, required: true, index: true },
+    memberId: { type: String, required: true, index: true },
+    createdByUserId: { type: String, required: true, index: true },
+    heartRate: { type: Number, required: true },
+    signalConfidence: { type: Number, required: true },
+    sessionDurationSec: { type: Number, required: true },
+    capturedAt: { type: Date, required: true, index: true },
+    waveformSamples: { type: [Number], required: false, default: undefined }
+  },
+  { timestamps: true, collection: "wellness_pulse_sessions" }
+);
+wellnessPulseSessionSchema.index({ familyId: 1, memberId: 1, capturedAt: -1 });
 
 const storedInsightSchema = new Schema(
   {
@@ -399,6 +449,9 @@ export const MemberLogAccessRequestModel = mongoose.model("MemberLogAccessReques
 export const FamilyInvitationModel = mongoose.model("FamilyInvitation", familyInvitationSchema);
 export const FamilyMemberModel = mongoose.model("FamilyMember", familyMemberSchema);
 export const HealthLogModel = mongoose.model("HealthLog", healthLogSchema);
+export const VitalReadingModel = mongoose.model("VitalReading", vitalReadingSchema);
+export const MedicationSlotModel = mongoose.model("MedicationSlot", medicationSlotSchema);
+export const WellnessPulseSessionModel = mongoose.model("WellnessPulseSession", wellnessPulseSessionSchema);
 export const InsightSnapshotModel = mongoose.model("InsightSnapshot", insightSnapshotSchema);
 export const RefreshTokenModel = mongoose.model("RefreshToken", refreshTokenSchema);
 export const AuditLogModel = mongoose.model("AuditLog", auditLogSchema);

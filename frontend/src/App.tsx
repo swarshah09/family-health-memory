@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Outlet, Route, Routes, Navigate } from "react-router-dom";
+import { BrowserRouter, Outlet, Route, Routes, Navigate, useLocation } from "react-router-dom";
+import { toast } from "sonner";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -7,6 +9,8 @@ import { AppProvider, useApp } from "@/context/AppContext";
 import AppDock from "@/components/AppDock";
 import AppTopBar from "@/components/AppTopBar";
 import AppSidebar from "@/components/AppSidebar";
+import ChronicleFamilyBar from "@/components/ChronicleFamilyBar";
+import AddLogDialog from "@/components/AddLogDialog";
 import HealthHubLayout from "@/layouts/HealthHubLayout";
 import FamilyHubLayout from "@/layouts/FamilyHubLayout";
 import InsightsHubLayout from "@/layouts/InsightsHubLayout";
@@ -14,6 +18,7 @@ import YouHubLayout from "@/layouts/YouHubLayout";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import AuthPage from "./pages/AuthPage";
+import LandingPage from "./pages/LandingPage";
 import AcceptInvitePage from "./pages/AcceptInvitePage";
 import Dashboard from "./pages/Dashboard";
 import FamilyWorkspacePage from "./pages/FamilyWorkspacePage";
@@ -33,17 +38,47 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+/** Satisfies the router for `/sign-in`; {@link AppShell} renders the real auth UI. */
+function SignInRouteStub() {
+  return null;
+}
+
 function AppShell() {
-  const { isAuthenticated } = useApp();
-  if (!isAuthenticated) return <AuthPage />;
+  const location = useLocation();
+  const { isAuthenticated, members, user } = useApp();
+  const [addLogOpen, setAddLogOpen] = useState(false);
+  const [addLogMemberId, setAddLogMemberId] = useState("");
+
+  const openAddLog = () => {
+    const tracked = members.filter((m) => !m.linkedUserId || m.linkedUserId !== user?.id);
+    const pick = tracked[0]?.id ?? members[0]?.id;
+    if (!pick) {
+      toast.error("Add a family profile first, then you can save an observation.");
+      return;
+    }
+    setAddLogMemberId(pick);
+    setAddLogOpen(true);
+  };
+
+  if (isAuthenticated && (location.pathname === "/sign-in" || location.pathname === "/signin")) {
+    return <Navigate to="/" replace />;
+  }
+
+  if (!isAuthenticated) {
+    if (location.pathname === "/sign-in" || location.pathname === "/signin") {
+      return <AuthPage />;
+    }
+    if (location.pathname === "/") {
+      return <LandingPage />;
+    }
+    return <Navigate to="/" replace />;
+  }
+
   return (
     <div
       className={cn(
-        "min-h-dvh w-full",
-        "bg-muted/35",
-        "bg-[radial-gradient(ellipse_100%_60%_at_50%_-8%,hsl(var(--primary)/0.09),transparent_55%)]",
-        "md:bg-muted/40 md:bg-[radial-gradient(ellipse_80%_50%_at_50%_0%,hsl(var(--primary)/0.07),transparent_50%),radial-gradient(ellipse_60%_40%_at_100%_100%,hsl(var(--insight)/0.06),transparent_45%)]",
-        "lg:bg-gradient-to-br lg:from-muted/50 lg:via-background lg:to-muted/30"
+        "min-h-dvh w-full bg-background grain-soft",
+        "bg-[radial-gradient(ellipse_100%_55%_at_50%_-10%,hsl(var(--primary)/0.06),transparent_52%)]"
       )}
     >
       <div className="mx-auto flex min-h-dvh w-full max-w-[1920px] flex-col lg:flex-row lg:items-stretch">
@@ -69,11 +104,19 @@ function AppShell() {
               "xl:mx-auto xl:max-w-[min(80rem,calc(100%-3rem))]"
             )}
           >
+            <ChronicleFamilyBar onAdd={openAddLog} className="lg:pr-14" />
             <AppTopBar />
             <div className="flex flex-1 flex-col lg:overflow-y-auto lg:pt-0">
               <Outlet />
             </div>
             <AppDock />
+            {addLogMemberId ? (
+              <AddLogDialog
+                open={addLogOpen}
+                onClose={() => setAddLogOpen(false)}
+                memberId={addLogMemberId}
+              />
+            ) : null}
           </div>
         </div>
       </div>
@@ -128,6 +171,9 @@ function AppRoutes() {
           <Route path="/automation" element={<Navigate to="/you/automation" replace />} />
           <Route path="/admin" element={<Navigate to="/you/admin" replace />} />
           <Route path="/chat-ingest" element={<Navigate to="/you/chat-ingest" replace />} />
+
+          <Route path="/sign-in" element={<SignInRouteStub />} />
+          <Route path="/signin" element={<Navigate to="/sign-in" replace />} />
 
           <Route path="*" element={<NotFound />} />
         </Route>

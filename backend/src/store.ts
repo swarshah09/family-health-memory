@@ -14,8 +14,11 @@ import {
   LogAccessGrantRow,
   LogAccessPermissionLevel,
   LogSourceType,
+  MedicationSlot,
   MemberLogAccessRequestRow,
   UserRole,
+  VitalReading,
+  WellnessPulseSession,
   WeeklyDigest,
   WorkspaceRole
 } from "./types.js";
@@ -27,13 +30,16 @@ import {
   FamilyWorkspaceModel,
   HealthLogModel,
   InsightSnapshotModel,
+  MedicationSlotModel,
   ChatMessageModel,
   JoinFamilyRequestModel,
   LogAccessGrantModel,
   MemberLogAccessRequestModel,
   NotificationModel,
   PrecomputedInsightModel,
+  VitalReadingModel,
   WeeklyDigestModel,
+  WellnessPulseSessionModel,
   UserModel
 } from "./models.js";
 import {
@@ -568,6 +574,9 @@ export async function ensurePersonalHealthMember(
 export async function deleteMember(familyId: string, memberId: string): Promise<void> {
   await FamilyMemberModel.deleteOne({ _id: memberId, familyId });
   await HealthLogModel.deleteMany({ memberId, familyId });
+  await VitalReadingModel.deleteMany({ memberId, familyId });
+  await MedicationSlotModel.deleteMany({ memberId, familyId });
+  await WellnessPulseSessionModel.deleteMany({ memberId, familyId });
 }
 
 export async function deleteFamilyMemberIfAllowed(familyId: string, memberId: string): Promise<void> {
@@ -680,6 +689,277 @@ export async function listRecentLogsForFamily(
 export async function getLogById(familyId: string, logId: string): Promise<HealthLog | null> {
   const result = await HealthLogModel.findOne({ _id: logId, familyId });
   return result ? mapLog(result) : null;
+}
+
+function mapVitalReading(doc: {
+  _id: { toString: () => string };
+  familyId: string;
+  memberId: string;
+  kind: "blood_pressure" | "glucose";
+  systolic?: number | null;
+  diastolic?: number | null;
+  mgDl?: number | null;
+  recordedAt: Date;
+  createdByUserId?: string | null;
+}): VitalReading {
+  return {
+    id: doc._id.toString(),
+    familyId: doc.familyId,
+    memberId: doc.memberId,
+    kind: doc.kind,
+    ...(doc.systolic != null && !Number.isNaN(doc.systolic) ? { systolic: doc.systolic } : {}),
+    ...(doc.diastolic != null && !Number.isNaN(doc.diastolic) ? { diastolic: doc.diastolic } : {}),
+    ...(doc.mgDl != null && !Number.isNaN(doc.mgDl) ? { mgDl: doc.mgDl } : {}),
+    recordedAt: doc.recordedAt.toISOString(),
+    ...(doc.createdByUserId ? { createdByUserId: String(doc.createdByUserId) } : {})
+  };
+}
+
+function mapMedicationSlot(doc: {
+  _id: { toString: () => string };
+  familyId: string;
+  memberId: string;
+  dayKey: string;
+  slotHalf: number;
+  status: "taken" | "missed" | "late" | "pending";
+  updatedAt: Date;
+}): MedicationSlot {
+  return {
+    id: doc._id.toString(),
+    familyId: doc.familyId,
+    memberId: doc.memberId,
+    dayKey: doc.dayKey,
+    slotHalf: doc.slotHalf === 1 ? 1 : 0,
+    status: doc.status,
+    updatedAt: doc.updatedAt.toISOString()
+  };
+}
+
+export async function listVitalReadingsForViewer(
+  familyId: string,
+  ctx: ViewerContext,
+  opts?: { memberId?: string; limit?: number }
+): Promise<VitalReading[]> {
+  const limit = Math.min(Math.max(opts?.limit ?? 240, 1), 500);
+  if (isHead(ctx)) {
+    const filter: Record<string, unknown> = { familyId };
+    if (opts?.memberId) filter.memberId = opts.memberId;
+    const rows = await VitalReadingModel.find(filter).sort({ recordedAt: -1 }).limit(limit).lean();
+    return rows.map((r) => mapVitalReading(r as never));
+  }
+  const [accessible, grants] = await Promise.all([
+    listAccessibleMemberProfileIds(familyId, ctx),
+    listGrantedMemberProfileIds(familyId, ctx.userId)
+  ]);
+  const union = new Set(accessible);
+  for (const g of grants) union.add(g);
+  const mids = opts?.memberId ? (union.has(opts.memberId) ? [opts.memberId] : []) : [...union];
+  if (mids.length === 0) return [];
+  const rows = await VitalReadingModel.find({ familyId, memberId: { $in: mids } })
+    .sort({ recordedAt: -1 })
+    .limit(limit)
+    .lean();
+  return rows.map((r) => mapVitalReading(r as never));
+}
+
+export async function listMedicationSlotsForViewer(
+  familyId: string,
+  ctx: ViewerContext,
+  opts?: { memberId?: string; sinceDayKey?: string }
+): Promise<MedicationSlot[]> {
+  if (isHead(ctx)) {
+    const filter: Record<string, unknown> = { familyId };
+    if (opts?.memberId) filter.memberId = opts.memberId;
+    if (opts?.sinceDayKey) filter.dayKey = { $gte: opts.sinceDayKey };
+    const rows = await MedicationSlotModel.find(filter).sort({ dayKey: 1, slotHalf: 1 }).limit(800).lean();
+    return rows.map((r) => mapMedicationSlot(r as never));
+  }
+  const [accessible, grants] = await Promise.all([
+    listAccessibleMemberProfileIds(familyId, ctx),
+    listGrantedMemberProfileIds(familyId, ctx.userId)
+  ]);
+  const union = new Set(accessible);
+  for (const g of grants) union.add(g);
+  const mids = opts?.memberId ? (union.has(opts.memberId) ? [opts.memberId] : []) : [...union];
+  if (mids.length === 0) return [];
+  const filter: Record<string, unknown> = { familyId, memberId: { $in: mids } };
+  if (opts?.sinceDayKey) filter.dayKey = { $gte: opts.sinceDayKey };
+  const rows = await MedicationSlotModel.find(filter).sort({ dayKey: 1, slotHalf: 1 }).limit(800).lean();
+  return rows.map((r) => mapMedicationSlot(r as never));
+}
+
+export async function createVitalReading(
+  familyId: string,
+  payload: {
+    memberId: string;
+    kind: "blood_pressure" | "glucose";
+    systolic?: number;
+    diastolic?: number;
+    mgDl?: number;
+    recordedAt?: string;
+    createdByUserId?: string;
+  }
+): Promise<VitalReading> {
+  const m = await FamilyMemberModel.findOne({ _id: payload.memberId, familyId }).lean();
+  if (!m) throw new Error("MEMBER_NOT_FOUND");
+  if (payload.kind === "blood_pressure") {
+    if (payload.systolic == null || Number.isNaN(Number(payload.systolic))) throw new Error("INVALID_VITAL");
+  } else if (payload.kind === "glucose") {
+    if (payload.mgDl == null || Number.isNaN(Number(payload.mgDl))) throw new Error("INVALID_VITAL");
+  }
+  const rec = await VitalReadingModel.create({
+    familyId,
+    memberId: payload.memberId,
+    kind: payload.kind,
+    systolic: payload.systolic,
+    diastolic: payload.diastolic,
+    mgDl: payload.mgDl,
+    recordedAt: new Date(payload.recordedAt || new Date().toISOString()),
+    createdByUserId: payload.createdByUserId
+  });
+  return mapVitalReading(rec);
+}
+
+export async function upsertMedicationSlot(
+  familyId: string,
+  payload: {
+    memberId: string;
+    dayKey: string;
+    slotHalf: 0 | 1;
+    status: "taken" | "missed" | "late" | "pending";
+  }
+): Promise<MedicationSlot> {
+  const m = await FamilyMemberModel.findOne({ _id: payload.memberId, familyId }).lean();
+  if (!m) throw new Error("MEMBER_NOT_FOUND");
+  const row = await MedicationSlotModel.findOneAndUpdate(
+    { familyId, memberId: payload.memberId, dayKey: payload.dayKey, slotHalf: payload.slotHalf },
+    { $set: { status: payload.status } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  if (!row) throw new Error("SLOT_UPSERT_FAILED");
+  return mapMedicationSlot(row);
+}
+
+function mapWellnessPulseSession(doc: {
+  _id: { toString: () => string };
+  familyId: string;
+  memberId: string;
+  createdByUserId: string;
+  heartRate: number;
+  signalConfidence: number;
+  sessionDurationSec: number;
+  capturedAt: Date;
+  waveformSamples?: number[] | null;
+}): WellnessPulseSession {
+  return {
+    id: doc._id.toString(),
+    familyId: doc.familyId,
+    memberId: doc.memberId,
+    createdByUserId: String(doc.createdByUserId),
+    heartRate: doc.heartRate,
+    signalConfidence: doc.signalConfidence,
+    sessionDurationSec: doc.sessionDurationSec,
+    capturedAt: doc.capturedAt.toISOString(),
+    ...(Array.isArray(doc.waveformSamples) && doc.waveformSamples.length
+      ? { waveformSamples: doc.waveformSamples.map((x) => Number(x)) }
+      : {})
+  };
+}
+
+/** Internal / jobs: list pulse rhythm snapshots for insight context (family-scoped). */
+export async function listWellnessPulseSessionsForMember(
+  familyId: string,
+  memberId: string,
+  opts?: { limit?: number; sinceDays?: number }
+): Promise<WellnessPulseSession[]> {
+  const limit = Math.min(Math.max(opts?.limit ?? 30, 1), 100);
+  const sinceDays = Math.min(Math.max(opts?.sinceDays ?? 42, 1), 120);
+  const since = new Date();
+  since.setDate(since.getDate() - sinceDays);
+  const rows = await WellnessPulseSessionModel.find({
+    familyId,
+    memberId,
+    capturedAt: { $gte: since }
+  })
+    .sort({ capturedAt: -1 })
+    .limit(limit)
+    .lean();
+  return rows.map((r) => mapWellnessPulseSession(r as never));
+}
+
+export async function listWellnessPulseSessionsForViewer(
+  familyId: string,
+  ctx: ViewerContext,
+  opts?: { memberId?: string; limit?: number }
+): Promise<WellnessPulseSession[]> {
+  const limit = Math.min(Math.max(opts?.limit ?? 40, 1), 100);
+  if (isHead(ctx)) {
+    const filter: Record<string, unknown> = { familyId };
+    if (opts?.memberId) filter.memberId = opts.memberId;
+    const rows = await WellnessPulseSessionModel.find(filter).sort({ capturedAt: -1 }).limit(limit).lean();
+    return rows.map((r) => mapWellnessPulseSession(r as never));
+  }
+  const [accessible, grants] = await Promise.all([
+    listAccessibleMemberProfileIds(familyId, ctx),
+    listGrantedMemberProfileIds(familyId, ctx.userId)
+  ]);
+  const union = new Set(accessible);
+  for (const g of grants) union.add(g);
+  const mids = opts?.memberId ? (union.has(opts.memberId) ? [opts.memberId] : []) : [...union];
+  if (mids.length === 0) return [];
+  const rows = await WellnessPulseSessionModel.find({ familyId, memberId: { $in: mids } })
+    .sort({ capturedAt: -1 })
+    .limit(limit)
+    .lean();
+  return rows.map((r) => mapWellnessPulseSession(r as never));
+}
+
+export async function createWellnessPulseSession(
+  familyId: string,
+  payload: {
+    memberId: string;
+    createdByUserId: string;
+    heartRate: number;
+    signalConfidence: number;
+    sessionDurationSec: number;
+    capturedAt?: string;
+    waveformSamples?: number[];
+  }
+): Promise<WellnessPulseSession> {
+  const m = await FamilyMemberModel.findOne({ _id: payload.memberId, familyId }).lean();
+  if (!m) throw new Error("MEMBER_NOT_FOUND");
+  const wf =
+    Array.isArray(payload.waveformSamples) && payload.waveformSamples.length
+      ? payload.waveformSamples.slice(0, 128).map((x) => Number(x))
+      : undefined;
+  const rec = await WellnessPulseSessionModel.create({
+    familyId,
+    memberId: payload.memberId,
+    createdByUserId: payload.createdByUserId,
+    heartRate: payload.heartRate,
+    signalConfidence: payload.signalConfidence,
+    sessionDurationSec: payload.sessionDurationSec,
+    capturedAt: new Date(payload.capturedAt || new Date().toISOString()),
+    ...(wf?.length ? { waveformSamples: wf } : {})
+  });
+  return mapWellnessPulseSession(rec);
+}
+
+export async function listDashboardHealthForViewer(
+  familyId: string,
+  ctx: ViewerContext,
+  opts?: { vitalsLimit?: number; slotDaysBack?: number }
+): Promise<{ vitals: VitalReading[]; medicationSlots: MedicationSlot[] }> {
+  const days = Math.min(Math.max(opts?.slotDaysBack ?? 10, 1), 30);
+  const since = new Date();
+  since.setUTCHours(0, 0, 0, 0);
+  since.setUTCDate(since.getUTCDate() - days);
+  const sinceDayKey = since.toISOString().slice(0, 10);
+  const [vitals, medicationSlots] = await Promise.all([
+    listVitalReadingsForViewer(familyId, ctx, { limit: opts?.vitalsLimit }),
+    listMedicationSlotsForViewer(familyId, ctx, { sinceDayKey })
+  ]);
+  return { vitals, medicationSlots };
 }
 
 export async function listTimelineNarrativeEvents(
@@ -1198,6 +1478,9 @@ export async function ensureFamilyWorkspaceRecord(familyId: string): Promise<Fam
     return {
       familyId,
       name: existing.name,
+      ...(existing.tagline != null && String(existing.tagline).trim()
+        ? { tagline: String(existing.tagline).trim() }
+        : {}),
       createdByUserId: String(existing.createdByUserId),
       createdAt:
         existing.createdAt instanceof Date ? existing.createdAt.toISOString() : new Date().toISOString()
@@ -1213,9 +1496,37 @@ export async function ensureFamilyWorkspaceRecord(familyId: string): Promise<Fam
   return {
     familyId,
     name: created.name,
+    ...(created.tagline != null && String(created.tagline).trim()
+      ? { tagline: String(created.tagline).trim() }
+      : {}),
     createdByUserId: String(created.createdByUserId),
     createdAt: created.createdAt?.toISOString() || new Date().toISOString()
   };
+}
+
+export async function updateFamilyWorkspaceMeta(
+  familyId: string,
+  patch: { name?: string; tagline?: string | null }
+): Promise<FamilyWorkspace | null> {
+  const set: Record<string, string> = {};
+  if (typeof patch.name === "string") {
+    const n = patch.name.trim();
+    if (n.length > 0 && n.length <= 120) set.name = n;
+  }
+  if (patch.tagline === null) {
+    await FamilyWorkspaceModel.updateOne({ familyId }, { $unset: { tagline: 1 } });
+  } else if (typeof patch.tagline === "string") {
+    const t = patch.tagline.trim().slice(0, 160);
+    if (t.length === 0) {
+      await FamilyWorkspaceModel.updateOne({ familyId }, { $unset: { tagline: 1 } });
+    } else {
+      set.tagline = t;
+    }
+  }
+  if (Object.keys(set).length > 0) {
+    await FamilyWorkspaceModel.updateOne({ familyId }, { $set: set });
+  }
+  return ensureFamilyWorkspaceRecord(familyId);
 }
 
 export async function requestJoinFamily(params: {

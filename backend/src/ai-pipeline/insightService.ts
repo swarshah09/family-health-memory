@@ -121,6 +121,8 @@ export async function insightService(params: {
   trend: TrendOutput;
   correlations: CorrelationOutput;
   logs?: Array<{ id: string; text: string }>;
+  /** Optional non-diagnostic wellness pulse context; must not replace log evidence. */
+  wellnessContext?: string;
 }): Promise<InsightOutput> {
   const toSeverity = (priority: "low" | "medium" | "high"): "info" | "warning" | "alert" =>
     priority === "high" ? "alert" : priority === "medium" ? "warning" : "info";
@@ -149,7 +151,16 @@ Trend data:
 ${JSON.stringify(params.trend, null, 2)}
 
 Correlation data:
-${JSON.stringify(params.correlations, null, 2)}`;
+${JSON.stringify(params.correlations, null, 2)}
+${
+  params.wellnessContext?.trim()
+    ? `
+
+Additional non-diagnostic context (camera fingertip pulse rhythm estimates; not blood pressure; not medical advice):
+${params.wellnessContext.trim()}
+When relevant, you may weave gentle wellness-oriented phrasing that relates log mentions (e.g. fatigue, sleep, dizziness) to these pulse rhythm snapshots in time. Do not diagnose. Do not imply hypertension. Evidence/sourceLogIds must still reference supplied log IDs only.`
+    : ""
+}`;
 
   const result = await params.model.generateContent({
     contents: [{ role: "user", parts: [{ text: prompt }] }],

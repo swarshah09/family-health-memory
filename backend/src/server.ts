@@ -73,6 +73,7 @@ import {
   updateAutomationSettings,
   updateFamilyUserRole,
   ensureFamilyWorkspaceRecord,
+  updateFamilyWorkspaceMeta,
   requestJoinFamily,
   listJoinFamilyRequests,
   approveJoinFamilyRequest,
@@ -87,7 +88,12 @@ import {
   setUserFamilyRole,
   updateUserProfile,
   leaveFamily,
-  ensurePersonalHealthMember
+  ensurePersonalHealthMember,
+  listDashboardHealthForViewer,
+  createVitalReading,
+  upsertMedicationSlot,
+  createWellnessPulseSession,
+  listWellnessPulseSessionsForViewer
 } from "./store.js";
 
 const app = express();
@@ -678,6 +684,39 @@ app.get("/api/families/:familyId/workspace", requireFamilyRole(["HEAD", "MEMBER"
   });
 });
 
+const workspaceMetaPatchSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  tagline: z.union([z.string().max(160), z.null()]).optional()
+});
+
+app.patch("/api/families/:familyId/workspace", requireFamilyRole(["HEAD"]), async (req, res) => {
+  if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
+    return res.status(403).json({ message: "Forbidden family access" });
+  }
+  const parsed = workspaceMetaPatchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid workspace payload", issues: parsed.error.issues });
+  }
+  const auth = (req as unknown as { auth: AuthTokenPayload }).auth;
+  try {
+    const next = await updateFamilyWorkspaceMeta(req.params.familyId, parsed.data);
+    if (!next) return res.status(404).json({ message: "Workspace not found" });
+    await writeAuditLog({
+      familyId: req.params.familyId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email,
+      action: "family.workspace.update",
+      targetType: "family_workspace",
+      targetId: req.params.familyId,
+      metadata: { fields: Object.keys(parsed.data) }
+    });
+    return res.json({ family: next });
+  } catch (e) {
+    console.error("PATCH workspace", e);
+    return res.status(500).json({ message: "Could not update workspace" });
+  }
+});
+
 /** Pending join requests only (heads). Keeps dashboard/dock counts aligned with Family workspace. */
 app.get("/api/families/:familyId/join-requests", requireFamilyRole(["HEAD"]), async (req, res) => {
   if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
@@ -1100,6 +1139,145 @@ app.get("/api/families/:familyId/logs", async (req, res) => {
   const auth = (req as unknown as { auth: AuthTokenPayload }).auth;
   const memberId = typeof req.query.memberId === "string" ? req.query.memberId : undefined;
   res.json({ logs: await listLogsForViewer(req.params.familyId, viewerFromAuth(auth), memberId) });
+});
+
+app.get("/api/families/:familyId/health-metrics", requireFamilyRole(["HEAD", "MEMBER"]), async (req, res) => {
+  if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
+    return res.status(403).json({ message: "Forbidden family access" });
+  }
+  const auth = (req as unknown as { auth: AuthTokenPayload }).auth;
+  const vitalsLimit = Math.min(Number(req.query.vitalsLimit) || 240, 500);
+  const slotDaysBack = Math.min(Number(req.query.slotDaysBack) || 10, 30);
+  const data = await listDashboardHealthForViewer(req.params.familyId, viewerFromAuth(auth), {
+    vitalsLimit,
+    slotDaysBack
+  });
+  return res.json(data);
+});
+
+const createVitalSchema = z.object({
+  memberId: z.string().min(1),
+  kind: z.enum(["blood_pressure", "glucose"]),
+  systolic: z.number().optional(),
+  diastolic: z.number().optional(),
+  mgDl: z.number().optional(),
+  recordedAt: z.string().datetime().optional()
+});
+
+app.post("/api/families/:familyId/vitals", requireFamilyRole(["HEAD", "MEMBER"]), async (req, res) => {
+  if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
+    return res.status(403).json({ message: "Forbidden family access" });
+  }
+  const auth = (req as unknown as { auth: AuthTokenPayload }).auth;
+  const parsed = createVitalSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid vital payload" });
+  try {
+    const vital = await createVitalReading(req.params.familyId, {
+      ...parsed.data,
+      createdByUserId: auth.userId
+    });
+    await writeAuditLog({
+      familyId: req.params.familyId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email || "unknown",
+      action: "vital.create",
+      targetType: "vital",
+      targetId: vital.id,
+      metadata: { memberId: vital.memberId, kind: vital.kind }
+    });
+    return res.status(201).json({ vital });
+  } catch (e) {
+    if (e instanceof Error && e.message === "MEMBER_NOT_FOUND") return res.status(404).json({ message: "Member not found" });
+    if (e instanceof Error && e.message === "INVALID_VITAL") return res.status(400).json({ message: "Invalid vital values for kind" });
+    throw e;
+  }
+});
+
+const medicationSlotSchema = z.object({
+  memberId: z.string().min(1),
+  dayKey: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  slotHalf: z.union([z.literal(0), z.literal(1)]),
+  status: z.enum(["taken", "missed", "late", "pending"])
+});
+
+app.put("/api/families/:familyId/medication-slots", requireFamilyRole(["HEAD", "MEMBER"]), async (req, res) => {
+  if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
+    return res.status(403).json({ message: "Forbidden family access" });
+  }
+  const auth = (req as unknown as { auth: AuthTokenPayload }).auth;
+  const parsed = medicationSlotSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid medication slot payload" });
+  try {
+    const slot = await upsertMedicationSlot(req.params.familyId, parsed.data);
+    await writeAuditLog({
+      familyId: req.params.familyId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email || "unknown",
+      action: "medication_slot.upsert",
+      targetType: "medication_slot",
+      targetId: slot.id,
+      metadata: { memberId: slot.memberId, dayKey: slot.dayKey, slotHalf: slot.slotHalf, status: slot.status }
+    });
+    return res.json({ slot });
+  } catch (e) {
+    if (e instanceof Error && e.message === "MEMBER_NOT_FOUND") return res.status(404).json({ message: "Member not found" });
+    throw e;
+  }
+});
+
+const wellnessPulseCreateSchema = z.object({
+  memberId: z.string().min(1),
+  heartRate: z.number().min(40).max(220),
+  signalConfidence: z.number().min(0).max(1),
+  sessionDurationSec: z.number().min(15).max(90),
+  capturedAt: z.string().datetime().optional(),
+  waveformSamples: z.array(z.number()).max(128).optional()
+});
+
+app.post("/api/families/:familyId/wellness-pulse-sessions", requireFamilyRole(["HEAD", "MEMBER"]), async (req, res) => {
+  if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
+    return res.status(403).json({ message: "Forbidden family access" });
+  }
+  const auth = (req as unknown as { auth: AuthTokenPayload }).auth;
+  const parsed = wellnessPulseCreateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid wellness pulse payload" });
+  try {
+    const session = await createWellnessPulseSession(req.params.familyId, {
+      ...parsed.data,
+      createdByUserId: auth.userId
+    });
+    await writeAuditLog({
+      familyId: req.params.familyId,
+      actorUserId: auth.userId,
+      actorEmail: auth.email || "unknown",
+      action: "wellness_pulse.create",
+      targetType: "wellness_pulse_session",
+      targetId: session.id,
+      metadata: {
+        memberId: session.memberId,
+        heartRate: session.heartRate,
+        signalConfidence: session.signalConfidence
+      }
+    });
+    return res.status(201).json({ session });
+  } catch (e) {
+    if (e instanceof Error && e.message === "MEMBER_NOT_FOUND") return res.status(404).json({ message: "Member not found" });
+    throw e;
+  }
+});
+
+app.get("/api/families/:familyId/wellness-pulse-sessions", requireFamilyRole(["HEAD", "MEMBER"]), async (req, res) => {
+  if ((req as { auth?: { familyId: string } }).auth?.familyId !== req.params.familyId) {
+    return res.status(403).json({ message: "Forbidden family access" });
+  }
+  const auth = (req as unknown as { auth: AuthTokenPayload }).auth;
+  const memberId = typeof req.query.memberId === "string" ? req.query.memberId : undefined;
+  const limit = Math.min(Number(req.query.limit) || 20, 100);
+  const sessions = await listWellnessPulseSessionsForViewer(req.params.familyId, viewerFromAuth(auth), {
+    memberId,
+    limit
+  });
+  return res.json({ sessions });
 });
 
 app.get("/api/families/:familyId/logs/:logId/audio", async (req, res) => {

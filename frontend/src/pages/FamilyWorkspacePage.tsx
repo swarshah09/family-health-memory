@@ -16,6 +16,7 @@ import {
   ChevronDown
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -53,7 +54,13 @@ type Grant = {
   permission: string;
 };
 type WorkspacePayload = {
-  family: { familyId: string; name: string; createdByUserId: string; createdAt: string } | null;
+  family: {
+    familyId: string;
+    name: string;
+    tagline?: string | null;
+    createdByUserId: string;
+    createdAt: string;
+  } | null;
   members: Array<{ id: string; name: string; age: number; relationship: string }>;
   joinRequests: JoinReq[];
   accessRequests: AccessReq[];
@@ -63,13 +70,16 @@ type WorkspacePayload = {
 
 export default function FamilyWorkspacePage() {
   const navigate = useNavigate();
-  const { user, members, familyUsers, loadFamilyUsers, refreshJoinRequestInbox } = useApp();
+  const { user, members, familyUsers, loadFamilyUsers, refreshJoinRequestInbox, updateWorkspaceBranding } = useApp();
   const inFamilyHub = useAppHub()?.hub === "family";
   const [data, setData] = useState<WorkspacePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [accessOpen, setAccessOpen] = useState(false);
   const [activityShowCount, setActivityShowCount] = useState(5);
   const [targetMemberId, setTargetMemberId] = useState<string>("");
+  const [brandingName, setBrandingName] = useState("");
+  const [brandingTagline, setBrandingTagline] = useState("");
+  const [brandingSaving, setBrandingSaving] = useState(false);
   const [requestedPermission, setRequestedPermission] = useState<"VIEW_ONLY" | "CONTRIBUTOR" | "FULL_ACCESS">(
     "VIEW_ONLY"
   );
@@ -107,6 +117,12 @@ export default function FamilyWorkspacePage() {
     // new reference on every context re-render (e.g. voice-log polling), which would refetch
     // workspace repeatedly and hit the API rate limiter (429).
   }, [user?.familyId, load]);
+
+  useEffect(() => {
+    if (!data?.family) return;
+    setBrandingName(data.family.name || "");
+    setBrandingTagline(typeof data.family.tagline === "string" ? data.family.tagline : "");
+  }, [data?.family]);
 
   const approveJoin = async (id: string) => {
     if (!user?.familyId) return;
@@ -188,6 +204,27 @@ export default function FamilyWorkspacePage() {
       await load();
     } catch (e) {
       toastFromCaughtError(e, "Request not sent", "");
+    }
+  };
+
+  const saveWorkspaceBranding = async () => {
+    const n = brandingName.trim();
+    if (!n) {
+      toast.error("Workspace name cannot be empty.");
+      return;
+    }
+    setBrandingSaving(true);
+    try {
+      await updateWorkspaceBranding({
+        name: n,
+        tagline: brandingTagline.trim() ? brandingTagline.trim().slice(0, 160) : null
+      });
+      await load();
+      toast.success("Workspace updated");
+    } catch (e) {
+      toastFromCaughtError(e, "Could not save workspace", "Try again in a moment.");
+    } finally {
+      setBrandingSaving(false);
     }
   };
 
@@ -331,6 +368,47 @@ export default function FamilyWorkspacePage() {
                     Until you have approved access, you&apos;ll mainly see notes you added yourself.
                   </p>
                 )}
+              </section>
+            ) : null}
+
+            {isHead && data?.family ? (
+              <section className="chronicle-card-soft space-y-3 p-4">
+                <div>
+                  <p className="overline mb-1">Header in the app</p>
+                  <h2 className="font-serif-display text-base font-semibold text-foreground">Workspace name & tagline</h2>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Shown next to the family mark at the top. Keep the tagline short and calm.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="overline block">Name</label>
+                  <Input
+                    value={brandingName}
+                    onChange={(e) => setBrandingName(e.target.value)}
+                    className="input-chronicle rounded-2xl"
+                    maxLength={120}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="overline block">Tagline (optional)</label>
+                  <Input
+                    value={brandingTagline}
+                    onChange={(e) => setBrandingTagline(e.target.value)}
+                    placeholder="e.g. A circle of care since 1972"
+                    className="input-chronicle rounded-2xl"
+                    maxLength={160}
+                    autoComplete="off"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  className="btn-chronicle-primary w-full sm:w-auto"
+                  disabled={brandingSaving}
+                  onClick={() => void saveWorkspaceBranding()}
+                >
+                  {brandingSaving ? "Saving…" : "Save"}
+                </Button>
               </section>
             ) : null}
 

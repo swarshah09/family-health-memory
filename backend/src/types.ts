@@ -32,6 +32,48 @@ export interface FamilyMember {
   createdAt: string;
 }
 
+/** Structured vital reading (dashboard + future charts). */
+export interface VitalReading {
+  id: string;
+  familyId: string;
+  memberId: string;
+  kind: "blood_pressure" | "glucose";
+  systolic?: number;
+  diastolic?: number;
+  mgDl?: number;
+  recordedAt: string;
+  createdByUserId?: string;
+}
+
+/** One AM/PM medication slot for a calendar day (UTC date key). */
+export interface MedicationSlot {
+  id: string;
+  familyId: string;
+  memberId: string;
+  /** ISO date YYYY-MM-DD (UTC). */
+  dayKey: string;
+  /** 0 = morning, 1 = evening. */
+  slotHalf: 0 | 1;
+  status: "taken" | "missed" | "late" | "pending";
+  updatedAt: string;
+}
+
+/** Camera fingertip pulse rhythm snapshot (wellness only; not diagnostic). */
+export interface WellnessPulseSession {
+  id: string;
+  familyId: string;
+  memberId: string;
+  createdByUserId: string;
+  /** Approximate beats per minute from PPG; not medical-grade. */
+  heartRate: number;
+  /** 0–1 signal quality estimate. */
+  signalConfidence: number;
+  sessionDurationSec: number;
+  capturedAt: string;
+  /** Normalized samples for light UI replay (optional, bounded length). */
+  waveformSamples?: number[];
+}
+
 /** Activity feed row aligned with audit events. */
 export interface FamilyActivityEvent {
   id: string;
@@ -146,6 +188,7 @@ export interface FamilyPermissionActivity {
 export interface FamilyWorkspace {
   familyId: string;
   name: string;
+  tagline?: string;
   createdByUserId: string;
   createdAt: string;
 }

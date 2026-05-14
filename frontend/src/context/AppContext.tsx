@@ -71,6 +71,41 @@ export interface Insight {
   source?: "rules" | "model";
 }
 
+export interface VitalReading {
+  id: string;
+  familyId: string;
+  memberId: string;
+  kind: "blood_pressure" | "glucose";
+  systolic?: number;
+  diastolic?: number;
+  mgDl?: number;
+  recordedAt: string;
+  createdByUserId?: string;
+}
+
+export interface MedicationSlot {
+  id: string;
+  familyId: string;
+  memberId: string;
+  dayKey: string;
+  slotHalf: 0 | 1;
+  status: "taken" | "missed" | "late" | "pending";
+  updatedAt: string;
+}
+
+/** Camera fingertip wellness rhythm snapshot (not diagnostic). */
+export interface WellnessPulseSession {
+  id: string;
+  familyId: string;
+  memberId: string;
+  createdByUserId: string;
+  heartRate: number;
+  signalConfidence: number;
+  sessionDurationSec: number;
+  capturedAt: string;
+  waveformSamples?: number[];
+}
+
 export type FamilyActivityEvent = {
   id: string;
   contributorId: string;
@@ -170,12 +205,45 @@ interface AppState {
   getCareGuidanceForMember: (memberId: string) => CareGuidanceItem[];
   getAllCareGuidance: () => CareGuidanceItem[];
   careGuidanceDisclaimer: string;
+  vitalReadings: VitalReading[];
+  medicationSlots: MedicationSlot[];
+  addVitalReading: (input: {
+    memberId: string;
+    kind: "blood_pressure" | "glucose";
+    systolic?: number;
+    diastolic?: number;
+    mgDl?: number;
+    recordedAt?: string;
+  }) => Promise<void>;
+  upsertMedicationSlot: (input: {
+    memberId: string;
+    dayKey: string;
+    slotHalf: 0 | 1;
+    status: "taken" | "missed" | "late" | "pending";
+  }) => Promise<void>;
+  saveWellnessPulseSession: (input: {
+    memberId: string;
+    heartRate: number;
+    signalConfidence: number;
+    sessionDurationSec: number;
+    capturedAt?: string;
+    waveformSamples?: number[];
+  }) => Promise<WellnessPulseSession>;
+  fetchWellnessPulseSessions: (memberId: string, limit?: number) => Promise<WellnessPulseSession[]>;
   refreshFamilyData: () => Promise<void>;
   insightsLoading: boolean;
   lastDataRefreshAt: number | null;
   /** Pending join requests for family heads (same source as Family workspace; drives dock badge). */
   pendingJoinInboxCount: number;
   refreshJoinRequestInbox: () => Promise<void>;
+  /** Display name from `FamilyWorkspace` (Chronicle header). */
+  workspaceName: string;
+  /** Optional subtitle under the workspace name (heads can edit via Family workspace). */
+  workspaceTagline: string | null;
+  /** When set, home dashboard focuses cards and timeline on this tracked member (Chronicle pills). */
+  dashboardPeopleFilterId: string | null;
+  setDashboardPeopleFilterId: (memberId: string | null) => void;
+  updateWorkspaceBranding: (patch: { name?: string; tagline?: string | null }) => Promise<void>;
   updateProfile: (patch: { name?: string; description?: string | null }) => Promise<void>;
   uploadProfilePhoto: (file: File) => Promise<void>;
   leaveFamily: () => Promise<void>;
@@ -203,6 +271,7 @@ function sessionUserFromApi(u: Record<string, unknown>): SessionUser {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const userRef = useRef<SessionUser | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<{
     id?: string;
@@ -229,6 +298,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [lastDataRefreshAt, setLastDataRefreshAt] = useState<number | null>(null);
   const [familyUsers, setFamilyUsers] = useState<AppState["familyUsers"]>([]);
   const [pendingJoinInboxCount, setPendingJoinInboxCount] = useState(0);
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [workspaceTagline, setWorkspaceTagline] = useState<string | null>(null);
+  const [dashboardPeopleFilterId, setDashboardPeopleFilterId] = useState<string | null>(null);
+  const [vitalReadings, setVitalReadings] = useState<VitalReading[]>([]);
+  const [medicationSlots, setMedicationSlots] = useState<MedicationSlot[]>([]);
 
   const syncJoinRequestInboxForProfile = useCallback(
     async (
@@ -293,6 +367,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setInsights([]);
         setCareGuidance([]);
         setCareGuidanceDisclaimer(CARE_GUIDANCE_DISCLAIMER_FALLBACK);
+        setWorkspaceName("");
+        setWorkspaceTagline(null);
+        setVitalReadings([]);
+        setMedicationSlots([]);
         localStorage.removeItem("fhm_access_token");
         localStorage.removeItem("fhm_refresh_token");
         localStorage.removeItem("fhm_user");
@@ -337,11 +415,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!token && !localStorage.getItem("fhm_access_token")) return;
     setInsightsLoading(true);
     try {
-      const [membersRes, logsRes, insightsRes, careGuidanceRes] = await Promise.all([
+      const [membersRes, logsRes, insightsRes, careGuidanceRes, workspaceRes, healthRes] = await Promise.all([
         apiFetch(`${API_BASE_URL}/api/families/${targetFamilyId}/members`),
         apiFetch(`${API_BASE_URL}/api/families/${targetFamilyId}/logs`),
         apiFetch(`${API_BASE_URL}/api/families/${targetFamilyId}/insights`),
-        apiFetch(`${API_BASE_URL}/api/families/${targetFamilyId}/care-guidance`)
+        apiFetch(`${API_BASE_URL}/api/families/${targetFamilyId}/care-guidance`),
+        apiFetch(`${API_BASE_URL}/api/families/${targetFamilyId}/workspace`),
+        apiFetch(
+          `${API_BASE_URL}/api/families/${targetFamilyId}/health-metrics?slotDaysBack=14&vitalsLimit=400`
+        )
       ]);
       const membersJson = await membersRes.json();
       const logsJson = await logsRes.json();
@@ -360,6 +442,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } else {
         setCareGuidance([]);
         setCareGuidanceDisclaimer(CARE_GUIDANCE_DISCLAIMER_FALLBACK);
+      }
+
+      const fallbackWorkspace =
+        userRef.current?.familyName?.trim() || "Family workspace";
+      if (workspaceRes.ok) {
+        const wj = (await workspaceRes.json()) as {
+          family?: { name?: string; tagline?: string | null } | null;
+        };
+        const fam = wj.family;
+        const nm =
+          typeof fam?.name === "string" && fam.name.trim() ? fam.name.trim() : fallbackWorkspace;
+        setWorkspaceName(nm);
+        if (fam?.tagline != null && String(fam.tagline).trim()) {
+          setWorkspaceTagline(String(fam.tagline).trim());
+        } else {
+          setWorkspaceTagline(null);
+        }
+      } else {
+        setWorkspaceName(fallbackWorkspace);
+        setWorkspaceTagline(null);
+      }
+
+      if (healthRes.ok) {
+        const hj = (await healthRes.json()) as { vitals?: VitalReading[]; medicationSlots?: MedicationSlot[] };
+        setVitalReadings(Array.isArray(hj.vitals) ? hj.vitals : []);
+        setMedicationSlots(Array.isArray(hj.medicationSlots) ? hj.medicationSlots : []);
+      } else {
+        setVitalReadings([]);
+        setMedicationSlots([]);
       }
 
       setMembers(membersJson.members || []);
@@ -452,6 +563,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const personalHealthEnsureAttempted = useRef(false);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   useEffect(() => {
     if (!isAuthenticated || !user?.familyId || !user?.id) {
@@ -617,6 +732,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setInsights([]);
     setCareGuidance([]);
     setCareGuidanceDisclaimer(CARE_GUIDANCE_DISCLAIMER_FALLBACK);
+    setWorkspaceName("");
+    setWorkspaceTagline(null);
+    setDashboardPeopleFilterId(null);
+    setVitalReadings([]);
+    setMedicationSlots([]);
     localStorage.removeItem("fhm_access_token");
     localStorage.removeItem("fhm_refresh_token");
     localStorage.removeItem("fhm_user");
@@ -836,6 +956,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("fhm_user", JSON.stringify(next));
   };
 
+  const updateWorkspaceBranding = async (patch: { name?: string; tagline?: string | null }) => {
+    if (!user?.familyId) throw new Error("Not authenticated");
+    const response = await apiFetch(`${API_BASE_URL}/api/families/${user.familyId}/workspace`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch)
+    });
+    await ensureOk(response, "Failed to update workspace");
+    const json = (await response.json()) as {
+      family?: { name?: string; tagline?: string | null } | null;
+    };
+    const f = json.family;
+    if (f && typeof f.name === "string" && f.name.trim()) setWorkspaceName(f.name.trim());
+    if (f?.tagline != null && String(f.tagline).trim()) setWorkspaceTagline(String(f.tagline).trim());
+    else if (patch.tagline === null || (typeof patch.tagline === "string" && !patch.tagline.trim())) {
+      setWorkspaceTagline(null);
+    }
+  };
+
   const leaveFamily = async () => {
     const response = await apiFetch(`${API_BASE_URL}/api/auth/leave-family`, { method: "POST" });
     if (response.status === 409) {
@@ -856,6 +995,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCareGuidanceDisclaimer(CARE_GUIDANCE_DISCLAIMER_FALLBACK);
     setFamilyUsers([]);
     setPendingJoinInboxCount(0);
+    setWorkspaceName("");
+    setWorkspaceTagline(null);
     setUser((prev) => {
       if (!prev) return null;
       const next: SessionUser = {
@@ -939,6 +1080,71 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await hydrateFromApi(user.familyId);
   };
 
+  const addVitalReading = async (input: {
+    memberId: string;
+    kind: "blood_pressure" | "glucose";
+    systolic?: number;
+    diastolic?: number;
+    mgDl?: number;
+    recordedAt?: string;
+  }) => {
+    if (!user?.familyId) throw new Error("Not authenticated");
+    const response = await apiFetch(`${API_BASE_URL}/api/families/${user.familyId}/vitals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input)
+    });
+    await ensureOk(response, "Failed to save vital");
+    await hydrateFromApi(user.familyId);
+  };
+
+  const upsertMedicationSlot = async (input: {
+    memberId: string;
+    dayKey: string;
+    slotHalf: 0 | 1;
+    status: "taken" | "missed" | "late" | "pending";
+  }) => {
+    if (!user?.familyId) throw new Error("Not authenticated");
+    const response = await apiFetch(`${API_BASE_URL}/api/families/${user.familyId}/medication-slots`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input)
+    });
+    await ensureOk(response, "Failed to update medication slot");
+    await hydrateFromApi(user.familyId);
+  };
+
+  const saveWellnessPulseSession = async (input: {
+    memberId: string;
+    heartRate: number;
+    signalConfidence: number;
+    sessionDurationSec: number;
+    capturedAt?: string;
+    waveformSamples?: number[];
+  }): Promise<WellnessPulseSession> => {
+    if (!user?.familyId) throw new Error("Not authenticated");
+    const response = await apiFetch(`${API_BASE_URL}/api/families/${user.familyId}/wellness-pulse-sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input)
+    });
+    await ensureOk(response, "Failed to save wellness session");
+    const json = (await response.json()) as { session?: WellnessPulseSession };
+    if (!json.session) throw new Error("Invalid wellness session response");
+    return json.session;
+  };
+
+  const fetchWellnessPulseSessions = async (memberId: string, limit = 20): Promise<WellnessPulseSession[]> => {
+    if (!user?.familyId) return [];
+    const q = new URLSearchParams({ memberId, limit: String(Math.min(Math.max(limit, 1), 100)) });
+    const response = await apiFetch(
+      `${API_BASE_URL}/api/families/${user.familyId}/wellness-pulse-sessions?${q.toString()}`
+    );
+    if (!response.ok) return [];
+    const json = (await response.json()) as { sessions?: WellnessPulseSession[] };
+    return Array.isArray(json.sessions) ? json.sessions : [];
+  };
+
   const memorySearch = async (input: {
     query: string;
     memberId?: string;
@@ -992,11 +1198,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         getCareGuidanceForMember,
         getAllCareGuidance,
         careGuidanceDisclaimer,
+        vitalReadings,
+        medicationSlots,
+        addVitalReading,
+        upsertMedicationSlot,
+        saveWellnessPulseSession,
+        fetchWellnessPulseSessions,
         refreshFamilyData,
         insightsLoading,
         lastDataRefreshAt,
         pendingJoinInboxCount,
         refreshJoinRequestInbox,
+        workspaceName,
+        workspaceTagline,
+        dashboardPeopleFilterId,
+        setDashboardPeopleFilterId,
+        updateWorkspaceBranding,
         updateProfile,
         uploadProfilePhoto,
         leaveFamily,

@@ -250,7 +250,8 @@ export async function generateGeminiInsights(
   familyId: string,
   memberId: string,
   memberDisplayName: string,
-  logs: HealthLog[]
+  logs: HealthLog[],
+  wellnessPulseContext?: string
 ): Promise<Insight[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return [];
@@ -342,7 +343,8 @@ export async function generateGeminiInsights(
         person: memberDisplayName,
         trend,
         correlations,
-        logs: memberLogs.map((log) => ({ id: log.id, text: log.text }))
+        logs: memberLogs.map((log) => ({ id: log.id, text: log.text })),
+        wellnessContext: wellnessPulseContext
       })
     );
 

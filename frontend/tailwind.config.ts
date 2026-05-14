@@ -15,7 +15,9 @@ export default {
     extend: {
       fontFamily: {
         sans: ["'Inter'", "system-ui", "sans-serif"],
-        display: ["'Outfit'", "'Inter'", "system-ui", "sans-serif"],
+        serif: ["'Newsreader'", "Georgia", "ui-serif", "serif"],
+        /** Large headings — Chronicle / Health Chronicle style */
+        display: ["'Newsreader'", "Georgia", "ui-serif", "serif"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -84,8 +86,6 @@ export default {
       boxShadow: {
         glow: "0 0 20px -5px hsl(var(--primary) / 0.2)",
         "glow-lg": "0 0 40px -10px hsl(var(--primary) / 0.3)",
-        soft: "0 2px 20px -4px rgba(0, 0, 0, 0.06)",
-        "soft-lg": "0 8px 40px -8px rgba(0, 0, 0, 0.1)",
       },
       keyframes: {
         "accordion-down": {
