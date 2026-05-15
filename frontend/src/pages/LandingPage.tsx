@@ -277,19 +277,25 @@ export default function LandingPage() {
               ].map((step) => (
                 <div
                   key={step.n}
-                  className="chronicle-card flex flex-col rounded-[1.75rem] p-5 sm:min-h-[17rem] sm:p-6"
+                  className="chronicle-card flex flex-col rounded-[1.75rem] p-5 sm:p-6"
                 >
-                  <span className="text-sm font-medium text-muted-foreground/80">{step.n}</span>
-                  <div
-                    className={cn(
-                      "mt-4 flex h-12 w-12 items-center justify-center rounded-full",
-                      step.tone
-                    )}
-                  >
-                    <step.icon className="h-5 w-5" strokeWidth={1.75} aria-hidden />
+                  <div className="flex items-center gap-3">
+                    <span className="w-7 shrink-0 text-sm font-semibold tabular-nums tracking-wide text-muted-foreground/90">
+                      {step.n}
+                    </span>
+                    <div
+                      className={cn(
+                        "flex h-11 w-11 shrink-0 items-center justify-center rounded-full",
+                        step.tone
+                      )}
+                    >
+                      <step.icon className="h-5 w-5" strokeWidth={1.75} aria-hidden />
+                    </div>
                   </div>
-                  <h3 className="mt-4 font-semibold text-foreground">{step.title}</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{step.body}</p>
+                  <div className="mt-4 min-w-0 flex-1">
+                    <h3 className="font-semibold leading-snug text-foreground">{step.title}</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{step.body}</p>
+                  </div>
                 </div>
               ))}
             </div>

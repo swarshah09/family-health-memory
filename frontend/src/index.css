@@ -482,6 +482,33 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  /* Landing trust ticker — two identical strips scroll as one loop */
+  .trust-banner-track {
+    display: flex;
+    width: max-content;
+    flex-wrap: nowrap;
+    animation: trust-banner-marquee 45s linear infinite;
+    will-change: transform;
+  }
+
+  @keyframes trust-banner-marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .trust-banner-track {
+      animation: none;
+      width: 100%;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+  }
 }
 
 @page {
