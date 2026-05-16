@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useTheme } from "next-themes";
-import { Moon, Plus, Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
+import AccountMenuButton from "@/components/AccountMenuButton";
 import { useApp } from "@/context/AppContext";
 import { cn } from "@/lib/utils";
 
@@ -13,7 +13,6 @@ type ChronicleFamilyBarProps = {
 export default function ChronicleFamilyBar({ onAdd, className }: ChronicleFamilyBarProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { resolvedTheme, setTheme } = useTheme();
   const { workspaceName, workspaceTagline, members, user, dashboardPeopleFilterId, setDashboardPeopleFilterId } =
     useApp();
 
@@ -28,10 +27,6 @@ export default function ChronicleFamilyBar({ onAdd, className }: ChronicleFamily
 
   const title = workspaceName?.trim() || user?.familyName?.trim() || "Family workspace";
   const tagline = workspaceTagline?.trim();
-
-  const toggleTheme = () => {
-    setTheme(resolvedTheme === "dark" ? "light" : "dark");
-  };
 
   useEffect(() => {
     if (location.pathname !== "/") setDashboardPeopleFilterId(null);
@@ -127,14 +122,7 @@ export default function ChronicleFamilyBar({ onAdd, className }: ChronicleFamily
           <Search className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
           <span className="truncate text-xs sm:text-sm">Ask the memory</span>
         </button>
-        <button
-          type="button"
-          onClick={toggleTheme}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border/70 bg-card text-foreground transition hover:bg-muted/50"
-          aria-label={resolvedTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-        >
-          <Moon className="h-[18px] w-[18px]" aria-hidden />
-        </button>
+        <AccountMenuButton />
         <button type="button" onClick={onAdd} className="btn-chronicle-primary shrink-0 gap-1.5 px-4 py-2 text-xs sm:text-sm">
           <Plus className="h-4 w-4" aria-hidden />
           Add

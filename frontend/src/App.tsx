@@ -7,7 +7,6 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppProvider, useApp } from "@/context/AppContext";
 import AppDock from "@/components/AppDock";
-import AppTopBar from "@/components/AppTopBar";
 import AppSidebar from "@/components/AppSidebar";
 import ChronicleFamilyBar from "@/components/ChronicleFamilyBar";
 import AddLogDialog from "@/components/AddLogDialog";
@@ -15,6 +14,8 @@ import HealthHubLayout from "@/layouts/HealthHubLayout";
 import FamilyHubLayout from "@/layouts/FamilyHubLayout";
 import InsightsHubLayout from "@/layouts/InsightsHubLayout";
 import YouHubLayout from "@/layouts/YouHubLayout";
+import { isHeadUser } from "@/lib/collaboration-roles";
+import { pickDefaultLogMemberId } from "@/lib/pick-default-log-member";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import AuthPage from "./pages/AuthPage";
@@ -45,15 +46,18 @@ function SignInRouteStub() {
 
 function AppShell() {
   const location = useLocation();
-  const { isAuthenticated, members, user } = useApp();
+  const { isAuthenticated, members, user, dashboardPeopleFilterId } = useApp();
   const [addLogOpen, setAddLogOpen] = useState(false);
   const [addLogMemberId, setAddLogMemberId] = useState("");
 
   const openAddLog = () => {
-    const tracked = members.filter((m) => !m.linkedUserId || m.linkedUserId !== user?.id);
-    const pick = tracked[0]?.id ?? members[0]?.id;
+    const pick = pickDefaultLogMemberId(members, user?.id, dashboardPeopleFilterId, user);
     if (!pick) {
-      toast.error("Add a family profile first, then you can save an observation.");
+      toast.error(
+        isHeadUser(user)
+          ? "Add a family profile first, then you can save an observation."
+          : "You can only add observations to your own health profile."
+      );
       return;
     }
     setAddLogMemberId(pick);
@@ -104,8 +108,7 @@ function AppShell() {
               "xl:mx-auto xl:max-w-[min(80rem,calc(100%-3rem))]"
             )}
           >
-            <ChronicleFamilyBar onAdd={openAddLog} className="lg:pr-14" />
-            <AppTopBar />
+            <ChronicleFamilyBar onAdd={openAddLog} />
             <div className="flex flex-1 flex-col lg:overflow-y-auto lg:pt-0">
               <Outlet />
             </div>

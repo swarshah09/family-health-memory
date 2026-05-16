@@ -36,6 +36,26 @@ export function canCreateHealthLogs(user?: { familyRole?: FamilyPermissionRole; 
   return Boolean(user?.familyId);
 }
 
+/**
+ * HEAD may log for any family profile. MEMBER may only log for their own linked profile.
+ */
+export function canLogForMemberProfile(
+  user:
+    | {
+        id?: string;
+        familyRole?: FamilyPermissionRole;
+        role?: ApiFamilyRole;
+        workspaceRole?: "head" | "member";
+      }
+    | null
+    | undefined,
+  member: { linkedUserId?: string }
+): boolean {
+  if (!user?.id || !user.familyId) return false;
+  if (isHeadUser(user)) return true;
+  return member.linkedUserId === user.id;
+}
+
 export function inferLogSourceTypeUi(log: {
   sourceType?: LogSourceTypeUi;
   ownerUserId?: string;

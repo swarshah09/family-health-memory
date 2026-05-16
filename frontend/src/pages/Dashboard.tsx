@@ -3,21 +3,24 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   ArrowRight,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Clock,
   Heart,
-  MessageCircle,
   Plus,
   Sparkles,
   UserPlus
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import AddMemberDialog from "@/components/AddMemberDialog";
 import AddLogDialog from "@/components/AddLogDialog";
 import PulseScanCard from "@/components/PulseScanCard";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { canOpenAddLogDialog, pickDefaultLogMemberId } from "@/lib/pick-default-log-member";
+import { isHeadUser } from "@/lib/collaboration-roles";
 import { sortLogsNewestFirst } from "../lib/dashboard-from-logs";
 
 export default function Dashboard() {
@@ -36,6 +39,7 @@ export default function Dashboard() {
   const [showAddMember, setShowAddMember] = useState(false);
   const [addLogOpen, setAddLogOpen] = useState(false);
   const [addLogMemberId, setAddLogMemberId] = useState("");
+  const [timelineExpanded, setTimelineExpanded] = useState(false);
 
   const insights = getAllInsights();
   const alertCount = insights.filter((i) => i.severity === "alert").length;
@@ -114,13 +118,21 @@ export default function Dashboard() {
     return "Your notes are weaving together steadily — keep capturing small moments; patterns emerge when you least force them.";
   }, [filteredInsights, inactiveMembersLabel]);
 
+  const canAddObservation = canOpenAddLogDialog(members, user);
+
+  const timelineCap = timelineExpanded ? 10 : 1;
+  const timelineLogs = useMemo(() => filteredLogs.slice(0, timelineCap), [filteredLogs, timelineCap]);
+  const collapsedMoreCount = Math.max(0, filteredLogs.length - 1);
+  const showTimelineToggle = filteredLogs.length > 1 || timelineExpanded;
+
+  useEffect(() => {
+    setTimelineExpanded(false);
+  }, [dashboardPeopleFilterId]);
+
   const openAddLog = () => {
-    const pick =
-      (dashboardPeopleFilterId && trackedMembers.find((m) => m.id === dashboardPeopleFilterId)?.id) ||
-      trackedMembers[0]?.id ||
-      members[0]?.id;
+    const pick = pickDefaultLogMemberId(members, user?.id, dashboardPeopleFilterId, user);
     if (!pick) {
-      setShowAddMember(true);
+      if (isHeadUser(user)) setShowAddMember(true);
       return;
     }
     setAddLogMemberId(pick);
@@ -139,29 +151,42 @@ export default function Dashboard() {
       <div className="relative border-b border-border/40 bg-background">
         <div className="mx-auto max-w-[min(88rem,calc(100%-1.5rem))] px-4 pb-8 pt-4 sm:px-6 sm:pb-10 sm:pt-5 lg:px-8 lg:pb-12 lg:pt-6">
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{dateLine}</p>
-          <div className="mt-4 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div className="min-w-0">
-              <h1 className="font-serif-display text-[1.65rem] font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-[2.35rem]">
-                {greeting}, {user?.name || "there"}.
-              </h1>
-              <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-                Here&apos;s what your family quietly noted, sensed, and started caring about today.
-              </p>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-full border-border/70 bg-card px-4 py-2 text-sm shadow-sm"
-                onClick={() => navigate("/insights/memory")}
-              >
-                <MessageCircle className="mr-2 h-4 w-4 opacity-70" aria-hidden />
-                Ask the memory
-              </Button>
-              <Button type="button" className="btn-chronicle-primary rounded-full px-5 py-2 text-sm" onClick={openAddLog}>
-                <Plus className="h-4 w-4" aria-hidden />
-                Add observation
-              </Button>
+          <div className="mt-4 max-w-3xl">
+            <h1 className="font-serif-display text-[1.65rem] font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-[2.35rem]">
+              {greeting}, {user?.name || "there"}.
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
+              Here&apos;s what your family quietly noted, sensed, and started caring about today.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2 sm:gap-2.5">
+              {canAddObservation ? (
+                <Button type="button" className="btn-chronicle-primary rounded-full px-5 py-2 text-sm" onClick={openAddLog}>
+                  <Plus className="h-4 w-4" aria-hidden />
+                  Add observation
+                </Button>
+              ) : null}
+              {(filteredInsights.length > 0 || alertCount > 0 || warningCount > 0) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-full border-border/70 bg-card/80 px-4 py-2 text-sm shadow-sm"
+                  onClick={() => navigate("/insights/patterns")}
+                >
+                  <Sparkles className="mr-2 h-4 w-4 opacity-70" aria-hidden />
+                  View patterns
+                </Button>
+              )}
+              {myHealthMember && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="rounded-full px-4 py-2 text-sm text-muted-foreground hover:text-foreground"
+                  onClick={() => navigate("/health/my")}
+                >
+                  <Heart className="mr-2 h-4 w-4 opacity-70" aria-hidden />
+                  My health
+                </Button>
+              )}
             </div>
           </div>
 
@@ -272,23 +297,25 @@ export default function Dashboard() {
                   A soft chronicle.
                 </h2>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="shrink-0 rounded-full border-border/70 text-xs"
-                onClick={openAddLog}
-              >
-                <Plus className="mr-1 h-3.5 w-3.5" aria-hidden />
-                New
-              </Button>
+              {canAddObservation ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 rounded-full border-border/70 text-xs"
+                  onClick={openAddLog}
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" aria-hidden />
+                  New
+                </Button>
+              ) : null}
             </div>
             <div className="relative mt-6 border-l border-border/60 pl-5 sm:pl-6">
               {filteredLogs.length === 0 ? (
                 <p className="py-8 text-sm text-muted-foreground">No observations yet for this view.</p>
               ) : (
                 <ul className="space-y-6">
-                  {filteredLogs.slice(0, 10).map((log) => {
+                  {timelineLogs.map((log) => {
                     const member = members.find((m) => m.id === log.memberId);
                     const when = formatDistanceToNow(new Date(log.timestamp), { addSuffix: true });
                     return (
@@ -339,6 +366,27 @@ export default function Dashboard() {
                   })}
                 </ul>
               )}
+              {showTimelineToggle ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="mt-4 w-full rounded-full text-sm text-muted-foreground hover:text-foreground"
+                  onClick={() => setTimelineExpanded((open) => !open)}
+                >
+                  {timelineExpanded ? (
+                    <>
+                      <ChevronUp className="mr-2 h-4 w-4" aria-hidden />
+                      Show less
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="mr-2 h-4 w-4" aria-hidden />
+                      Show {collapsedMoreCount} more{" "}
+                      {collapsedMoreCount === 1 ? "entry" : "entries"}
+                    </>
+                  )}
+                </Button>
+              ) : null}
             </div>
           </section>
 

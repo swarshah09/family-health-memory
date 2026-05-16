@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useRef, createContext, useContext, ReactNode } from "react";
+import { authStorage } from "@/lib/auth-storage";
 import { AppRequestError, authHttpFailure } from "@/lib/toast-errors";
 import type { MemorySearchResult } from "@/types/memory-search";
 import type { CareGuidanceItem } from "@/types/care-guidance";
@@ -285,9 +286,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     profilePictureUrl?: string;
     description?: string;
   } | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem("fhm_access_token"));
+  const [token, setToken] = useState<string | null>(authStorage.getAccessToken());
   const [refreshToken, setRefreshToken] = useState<string | null>(
-    localStorage.getItem("fhm_refresh_token")
+    authStorage.getRefreshToken()
   );
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [logs, setLogs] = useState<HealthLog[]>([]);
@@ -342,11 +343,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const refreshJoinRequestInbox = useCallback(async () => {
-    await syncJoinRequestInboxForProfile(user, token || localStorage.getItem("fhm_access_token"));
+    await syncJoinRequestInboxForProfile(user, token || authStorage.getAccessToken());
   }, [user, token, syncJoinRequestInboxForProfile]);
 
   const refreshAccessToken = async (): Promise<string | null> => {
-    const rawRefreshToken = refreshToken || localStorage.getItem("fhm_refresh_token");
+    const rawRefreshToken = refreshToken || authStorage.getRefreshToken();
     if (!rawRefreshToken) return null;
     const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
       method: "POST",
@@ -371,9 +372,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setWorkspaceTagline(null);
         setVitalReadings([]);
         setMedicationSlots([]);
-        localStorage.removeItem("fhm_access_token");
-        localStorage.removeItem("fhm_refresh_token");
-        localStorage.removeItem("fhm_user");
+        authStorage.clear();
       }
       return null;
     }
@@ -382,13 +381,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const nextRefreshToken = json.refreshToken as string;
     setToken(nextAccessToken);
     setRefreshToken(nextRefreshToken);
-    localStorage.setItem("fhm_access_token", nextAccessToken);
-    localStorage.setItem("fhm_refresh_token", nextRefreshToken);
+    authStorage.setAccessToken(nextAccessToken);
+    authStorage.setRefreshToken(nextRefreshToken);
     return nextAccessToken;
   };
 
   const apiFetch = async (url: string, init: RequestInit = {}) => {
-    const currentToken = token || localStorage.getItem("fhm_access_token");
+    const currentToken = token || authStorage.getAccessToken();
     const headers = new Headers(init.headers || {});
     if (currentToken) headers.set("Authorization", `Bearer ${currentToken}`);
     const first = await fetch(url, { ...init, headers });
@@ -412,7 +411,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const hydrateFromApi = async (targetFamilyId: string) => {
-    if (!token && !localStorage.getItem("fhm_access_token")) return;
+    if (!token && !authStorage.getAccessToken()) return;
     setInsightsLoading(true);
     try {
       const [membersRes, logsRes, insightsRes, careGuidanceRes, workspaceRes, healthRes] = await Promise.all([
@@ -583,8 +582,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [isAuthenticated, user?.familyId, user?.id, members.length]);
 
   useEffect(() => {
-    const rawUser = localStorage.getItem("fhm_user");
-    if (rawUser && (token || localStorage.getItem("fhm_access_token"))) {
+    const rawUser = authStorage.getUserJson();
+    if (rawUser && (token || authStorage.getAccessToken())) {
       const parsedUser = JSON.parse(rawUser) as SessionUser;
       setUser(parsedUser);
       setIsAuthenticated(true);
@@ -595,7 +594,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           role: parsedUser.role
         }).catch(() => {});
       }
-      void syncJoinRequestInboxForProfile(parsedUser, localStorage.getItem("fhm_access_token"));
+      void syncJoinRequestInboxForProfile(parsedUser, authStorage.getAccessToken());
     }
   }, [syncJoinRequestInboxForProfile]);
 
@@ -648,9 +647,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setUser(nextUser);
     setToken(nextAccessToken);
     setRefreshToken(nextRefreshToken);
-    localStorage.setItem("fhm_access_token", nextAccessToken);
-    localStorage.setItem("fhm_refresh_token", nextRefreshToken);
-    localStorage.setItem("fhm_user", JSON.stringify(nextUser));
+    authStorage.setSession(nextAccessToken, nextRefreshToken, JSON.stringify(nextUser));
     setIsAuthenticated(true);
     if (nextUser.familyId) {
       await hydrateFromApi(nextUser.familyId);
@@ -700,9 +697,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setUser(nextUser);
     setToken(nextAccessToken);
     setRefreshToken(nextRefreshToken);
-    localStorage.setItem("fhm_access_token", nextAccessToken);
-    localStorage.setItem("fhm_refresh_token", nextRefreshToken);
-    localStorage.setItem("fhm_user", JSON.stringify(nextUser));
+    authStorage.setSession(nextAccessToken, nextRefreshToken, JSON.stringify(nextUser));
     setIsAuthenticated(true);
     if (nextUser.familyId) {
       await hydrateFromApi(nextUser.familyId);
@@ -713,7 +708,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     personalHealthEnsureAttempted.current = false;
-    const rawRefreshToken = refreshToken || localStorage.getItem("fhm_refresh_token");
+    const rawRefreshToken = refreshToken || authStorage.getRefreshToken();
     if (rawRefreshToken) {
       fetch(`${API_BASE_URL}/api/auth/logout`, {
         method: "POST",
@@ -737,9 +732,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDashboardPeopleFilterId(null);
     setVitalReadings([]);
     setMedicationSlots([]);
-    localStorage.removeItem("fhm_access_token");
-    localStorage.removeItem("fhm_refresh_token");
-    localStorage.removeItem("fhm_user");
+    authStorage.clear();
   };
 
   const addMember = async (member: Omit<FamilyMember, "id" | "linkedUserId">) => {
@@ -937,7 +930,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!json.user) throw new Error("Invalid profile response");
     const next = sessionUserFromApi(json.user);
     setUser(next);
-    localStorage.setItem("fhm_user", JSON.stringify(next));
+    authStorage.setUserJson(JSON.stringify(next));
   };
 
   const uploadProfilePhoto = async (file: File) => {
@@ -953,7 +946,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!json.user) throw new Error("Invalid photo response");
     const next = sessionUserFromApi(json.user);
     setUser(next);
-    localStorage.setItem("fhm_user", JSON.stringify(next));
+    authStorage.setUserJson(JSON.stringify(next));
   };
 
   const updateWorkspaceBranding = async (patch: { name?: string; tagline?: string | null }) => {
@@ -1007,7 +1000,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         workspaceRole: undefined,
         role: "viewer"
       };
-      localStorage.setItem("fhm_user", JSON.stringify(next));
+      authStorage.setUserJson(JSON.stringify(next));
       return next;
     });
   };
@@ -1039,9 +1032,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setUser(nextUser);
     setToken(nextAccessToken);
     setRefreshToken(nextRefreshToken);
-    localStorage.setItem("fhm_access_token", nextAccessToken);
-    localStorage.setItem("fhm_refresh_token", nextRefreshToken);
-    localStorage.setItem("fhm_user", JSON.stringify(nextUser));
+    authStorage.setSession(nextAccessToken, nextRefreshToken, JSON.stringify(nextUser));
     setIsAuthenticated(true);
     if (nextUser.familyId) {
       await hydrateFromApi(nextUser.familyId);
