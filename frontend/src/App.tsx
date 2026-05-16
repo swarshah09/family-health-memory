@@ -14,8 +14,7 @@ import HealthHubLayout from "@/layouts/HealthHubLayout";
 import FamilyHubLayout from "@/layouts/FamilyHubLayout";
 import InsightsHubLayout from "@/layouts/InsightsHubLayout";
 import YouHubLayout from "@/layouts/YouHubLayout";
-import { isHeadUser } from "@/lib/collaboration-roles";
-import { pickDefaultLogMemberId } from "@/lib/pick-default-log-member";
+import { isHeadUser, pickDefaultLogMemberId } from "@/lib/collaboration-roles";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import AuthPage from "./pages/AuthPage";
@@ -104,8 +103,7 @@ function AppShell() {
               "shadow-[0_0_0_1px_hsl(var(--border)/0.35)]",
               "sm:max-w-[420px] sm:shadow-[0_0_0_1px_hsl(var(--border)/0.35)]",
               "md:my-4 md:min-h-[calc(100dvh-2rem)] md:max-w-[min(42rem,calc(100%-1.5rem))] md:overflow-hidden md:rounded-[1.35rem] md:shadow-soft-lg md:ring-1 md:ring-border/40",
-              "lg:my-0 lg:min-h-dvh lg:max-w-none lg:rounded-none lg:shadow-none lg:ring-0",
-              "xl:mx-auto xl:max-w-[min(80rem,calc(100%-3rem))]"
+              "lg:my-0 lg:min-h-dvh lg:w-full lg:max-w-none lg:rounded-none lg:shadow-none lg:ring-0"
             )}
           >
             <ChronicleFamilyBar onAdd={openAddLog} />

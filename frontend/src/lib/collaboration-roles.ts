@@ -1,3 +1,5 @@
+import type { FamilyMember } from "@/context/AppContext";
+
 /** Legacy API roles (invitations / old logs). */
 export type ApiFamilyRole = "owner" | "caregiver" | "viewer";
 
@@ -43,6 +45,7 @@ export function canLogForMemberProfile(
   user:
     | {
         id?: string;
+        familyId?: string;
         familyRole?: FamilyPermissionRole;
         role?: ApiFamilyRole;
         workspaceRole?: "head" | "member";
@@ -149,4 +152,69 @@ export function formatActivityTargetType(targetType: string): string {
     notification: "Reminder"
   };
   return map[targetType] || "Record";
+}
+
+export type LogAuthorUser = {
+  id?: string;
+  familyId?: string;
+  familyRole?: FamilyPermissionRole;
+  role?: ApiFamilyRole;
+  workspaceRole?: "head" | "member";
+};
+
+function writableMembers(members: FamilyMember[], user: LogAuthorUser | null | undefined): FamilyMember[] {
+  if (!user?.id) return [];
+  return members.filter((m) => canLogForMemberProfile(user, m));
+}
+
+/** Choose who a new observation should be for (filter → self profile → first allowed). */
+export function pickDefaultLogMemberId(
+  members: FamilyMember[],
+  userId: string | undefined,
+  dashboardPeopleFilterId: string | null,
+  user?: LogAuthorUser | null
+): string | null {
+  const allowed = writableMembers(members, user);
+  if (!allowed.length) return null;
+
+  if (dashboardPeopleFilterId) {
+    const filtered = allowed.find((m) => m.id === dashboardPeopleFilterId);
+    if (filtered) return filtered.id;
+  }
+
+  if (userId) {
+    const self = allowed.find((m) => m.linkedUserId === userId);
+    if (self) return self.id;
+  }
+
+  return allowed[0]?.id ?? null;
+}
+
+/** Profiles this user may attach a new log to (self first for members). */
+export function listLogMemberOptions(
+  members: FamilyMember[],
+  userId: string | undefined,
+  user?: LogAuthorUser | null
+): FamilyMember[] {
+  const allowed = writableMembers(members, user);
+  const self = userId ? allowed.find((m) => m.linkedUserId === userId) : undefined;
+  const others = allowed
+    .filter((m) => m.id !== self?.id)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  return self ? [self, ...others] : allowed;
+}
+
+export function logMemberLabel(member: FamilyMember, userId: string | undefined): string {
+  if (userId && member.linkedUserId === userId) {
+    return `${member.name} (you)`;
+  }
+  return member.name;
+}
+
+export function canOpenAddLogDialog(members: FamilyMember[], user?: LogAuthorUser | null): boolean {
+  return writableMembers(members, user).length > 0;
+}
+
+export function isFamilyHeadForLogging(user?: LogAuthorUser | null): boolean {
+  return isHeadUser(user ?? null);
 }

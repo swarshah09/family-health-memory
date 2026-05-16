@@ -165,6 +165,83 @@
     @apply border-b border-border/60 bg-[hsl(var(--background)/0.92)] backdrop-blur-md supports-[backdrop-filter]:bg-[hsl(var(--background)/0.88)];
   }
 
+  /* Member pills: Everyone flush left at start; right end fades until scrolled */
+  .chronicle-member-scroll {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    /* Default: full visibility on the left (Everyone), fade only on the right */
+    -webkit-mask-image: linear-gradient(
+      to right,
+      #000 0,
+      #000 calc(100% - 2.5rem),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to right,
+      #000 0,
+      #000 calc(100% - 2.5rem),
+      transparent 100%
+    );
+  }
+
+  /* After scrolling: left edge fades too (Everyone can slide under it) */
+  .chronicle-member-scroll--scrolled {
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 1.75rem,
+      #000 calc(100% - 2.5rem),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 1.75rem,
+      #000 calc(100% - 2.5rem),
+      transparent 100%
+    );
+  }
+
+  .chronicle-member-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .chronicle-member-fade-left,
+  .chronicle-member-fade-right {
+    @apply pointer-events-none absolute inset-y-0 z-[2] w-10 transition-opacity duration-200 sm:w-12;
+  }
+
+  .chronicle-member-fade-left {
+    left: 0;
+    opacity: 0;
+    background: linear-gradient(
+      to right,
+      hsl(var(--background) / 0.98) 0%,
+      hsl(var(--background) / 0.85) 35%,
+      transparent 100%
+    );
+  }
+
+  .chronicle-member-fade-left--visible {
+    opacity: 1;
+  }
+
+  .chronicle-member-fade-right {
+    right: 0;
+    background: linear-gradient(
+      to left,
+      hsl(var(--background) / 0.98) 0%,
+      hsl(var(--background) / 0.85) 35%,
+      transparent 100%
+    );
+  }
+
+  .chronicle-member-fade-right--hidden {
+    opacity: 0;
+  }
+
   .grain-soft {
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
   }
@@ -215,6 +292,16 @@
     gap: 3px;
     align-items: center;
     height: 64px;
+  }
+
+  .landing-wave-compact {
+    height: 40px;
+  }
+
+  @media (min-width: 640px) {
+    .landing-wave-compact {
+      height: 52px;
+    }
   }
 
   .wave span {

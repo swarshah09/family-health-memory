@@ -19,8 +19,7 @@ import AddLogDialog from "@/components/AddLogDialog";
 import PulseScanCard from "@/components/PulseScanCard";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
-import { canOpenAddLogDialog, pickDefaultLogMemberId } from "@/lib/pick-default-log-member";
-import { isHeadUser } from "@/lib/collaboration-roles";
+import { canOpenAddLogDialog, isHeadUser, pickDefaultLogMemberId } from "@/lib/collaboration-roles";
 import { sortLogsNewestFirst } from "../lib/dashboard-from-logs";
 
 export default function Dashboard() {
@@ -149,7 +148,7 @@ export default function Dashboard() {
   return (
     <div className="app-shell app-safe-bottom">
       <div className="relative border-b border-border/40 bg-background">
-        <div className="mx-auto max-w-[min(88rem,calc(100%-1.5rem))] px-4 pb-8 pt-4 sm:px-6 sm:pb-10 sm:pt-5 lg:px-8 lg:pb-12 lg:pt-6">
+        <div className="w-full px-4 pb-8 pt-4 sm:px-6 sm:pb-10 sm:pt-5 lg:px-8 lg:pb-12 lg:pt-6">
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{dateLine}</p>
           <div className="mt-4 max-w-3xl">
             <h1 className="font-serif-display text-[1.65rem] font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-[2.35rem]">
@@ -237,7 +236,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-[min(88rem,calc(100%-1.5rem))] space-y-6 px-4 py-8 sm:px-6 lg:space-y-8 lg:px-8 lg:py-10">
+      <div className="w-full space-y-6 px-4 py-8 sm:px-6 lg:space-y-8 lg:px-8 lg:py-10">
         {/* Top grid: weather + pulse scan */}
         <div className="grid gap-4 lg:grid-cols-12 lg:gap-5">
           <motion.section

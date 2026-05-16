@@ -74,13 +74,14 @@ function TrustBannerStrip({ forMarqueeDuplicate }: { forMarqueeDuplicate?: boole
 function Nav() {
   return (
     <header className="sticky top-0 z-50 border-b border-border/50 bg-[hsl(var(--background)/0.88)] backdrop-blur-md">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-        <Link to="/" className="flex items-center gap-2.5 text-foreground">
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+      <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-2 px-4 py-3 sm:gap-4 sm:px-6 sm:py-4 lg:px-8">
+        <Link to="/" className="flex min-w-0 items-center gap-2 text-foreground sm:gap-2.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground sm:h-9 sm:w-9">
             f
           </span>
-          <span className="font-serif-display text-lg font-semibold tracking-tight lowercase sm:text-xl">
-            family health memory
+          <span className="truncate font-serif-display text-base font-semibold tracking-tight lowercase sm:text-lg lg:text-xl">
+            <span className="sm:hidden">family health</span>
+            <span className="hidden sm:inline">family health memory</span>
           </span>
         </Link>
         <nav className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
@@ -94,34 +95,44 @@ function Nav() {
             Trust &amp; privacy
           </a>
         </nav>
-        <div className="flex items-center gap-3 sm:gap-4">
-          <Link to="/sign-in" className="text-sm font-medium text-muted-foreground transition hover:text-foreground">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <Link
+            to="/sign-in"
+            className="hidden text-sm font-medium text-muted-foreground transition hover:text-foreground min-[400px]:inline"
+          >
             Sign in
           </Link>
-          <Link to="/sign-in?signup=1" className="btn-chronicle-primary inline-flex px-4 py-2 text-sm">
-            Open workspace
-            <ArrowRight className="h-4 w-4" aria-hidden />
+          <Link
+            to="/sign-in?signup=1"
+            className="btn-chronicle-primary inline-flex shrink-0 px-3 py-2 text-xs sm:px-4 sm:py-2 sm:text-sm"
+          >
+            <span className="hidden min-[400px]:inline">Open workspace</span>
+            <span className="min-[400px]:hidden">Start</span>
+            <ArrowRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
           </Link>
         </div>
       </div>
-      <div className="flex justify-center gap-4 border-t border-border/30 py-2 text-xs text-muted-foreground md:hidden">
-        <a href="#how-it-works" className="font-medium">
+      <nav
+        className="flex justify-center gap-5 overflow-x-auto border-t border-border/30 px-4 py-2.5 text-xs text-muted-foreground [-ms-overflow-style:none] [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden"
+        aria-label="Page sections"
+      >
+        <a href="#how-it-works" className="shrink-0 font-medium whitespace-nowrap">
           How it works
         </a>
-        <a href="#features" className="font-medium">
+        <a href="#features" className="shrink-0 font-medium whitespace-nowrap">
           Features
         </a>
-        <a href="#trust" className="font-medium">
+        <a href="#trust" className="shrink-0 font-medium whitespace-nowrap">
           Trust
         </a>
-      </div>
+      </nav>
     </header>
   );
 }
 
 export default function LandingPage() {
   return (
-    <div className="min-h-dvh bg-background grain-soft text-foreground">
+    <div className="min-h-dvh overflow-x-hidden bg-background grain-soft text-foreground">
       <div
         className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(ellipse_70%_50%_at_0%_0%,hsl(var(--primary)/0.07),transparent_55%),radial-gradient(ellipse_60%_45%_at_100%_0%,hsl(var(--accent)/0.08),transparent_50%),radial-gradient(ellipse_50%_40%_at_50%_100%,hsl(var(--primary)/0.05),transparent_50%)]"
         aria-hidden
@@ -130,9 +141,9 @@ export default function LandingPage() {
 
       <main>
         {/* Hero */}
-        <section className="mx-auto max-w-6xl px-4 pb-16 pt-10 sm:px-6 sm:pb-20 sm:pt-14 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:items-center lg:gap-x-10 lg:gap-y-0 lg:px-8 lg:pb-24 lg:pt-16">
+        <section className="mx-auto w-full max-w-6xl px-4 pb-12 pt-8 sm:px-6 sm:pb-20 sm:pt-12 md:pb-16 md:pt-14 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:items-center lg:gap-x-10 lg:gap-y-0 lg:px-8 lg:pb-24 lg:pt-16">
           <motion.div
-            className="max-w-xl min-w-0 lg:max-w-[min(36rem,100%)]"
+            className="w-full min-w-0 max-w-xl lg:max-w-[min(36rem,100%)]"
             initial="hidden"
             animate="visible"
             variants={stagger}
@@ -144,28 +155,28 @@ export default function LandingPage() {
             </motion.div>
             <motion.h1
               variants={fadeUp}
-              className="font-serif-display mt-6 text-[2.125rem] font-semibold leading-[1.1] tracking-[-0.02em] text-foreground sm:text-5xl sm:leading-[1.08] lg:mt-7 lg:text-[4.125rem]"
+              className="font-serif-display mt-5 text-[1.75rem] font-semibold leading-[1.12] tracking-[-0.02em] text-foreground min-[380px]:text-[2.125rem] sm:mt-6 sm:text-5xl sm:leading-[1.08] lg:mt-7 lg:text-[4.125rem]"
             >
               The quiet keeper of your{" "}
               <em className="font-serif-display text-primary italic">family&apos;s wellbeing.</em>
             </motion.h1>
             <motion.p
               variants={fadeUp}
-              className="mt-5 max-w-[26rem] font-sans text-[0.9375rem] font-normal leading-[1.65] text-muted-foreground sm:mt-6 sm:text-base sm:leading-[1.7]"
+              className="mt-5 max-w-none font-sans text-[0.9375rem] font-normal leading-[1.65] text-muted-foreground sm:mt-6 sm:max-w-[26rem] sm:text-base sm:leading-[1.7]"
             >
               Family Health Memory weaves together small observations, voice notes and vitals into a calm, intelligent
               timeline — so the people you love are never seen in fragments again.
             </motion.p>
-            <motion.div variants={fadeUp} className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-              <Link to="/sign-in?signup=1" className="btn-chronicle-primary justify-center px-6 py-3 text-base">
+            <motion.div variants={fadeUp} className="mt-7 flex w-full flex-col gap-3 sm:mt-8 sm:flex-row sm:flex-wrap sm:items-center">
+              <Link to="/sign-in?signup=1" className="btn-chronicle-primary w-full justify-center px-5 py-3 text-sm sm:w-auto sm:px-6 sm:text-base">
                 Open your family workspace
                 <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
               </Link>
-              <a href="#how-it-works" className="btn-chronicle-outline justify-center px-6 py-3 text-base">
+              <a href="#how-it-works" className="btn-chronicle-outline w-full justify-center px-5 py-3 text-sm sm:w-auto sm:px-6 sm:text-base">
                 See a live family · demo
               </a>
             </motion.div>
-            <motion.div variants={fadeUp} className="mt-10 flex items-center gap-4 sm:mt-11">
+            <motion.div variants={fadeUp} className="mt-8 flex items-center gap-3 sm:mt-11 sm:gap-4">
               <div className="flex shrink-0 -space-x-2.5">
                 {heroSocialAvatars.map((a, i) => (
                   <img
@@ -196,28 +207,51 @@ export default function LandingPage() {
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.9 }}
-            className="relative mt-10 min-w-0 lg:mt-0"
+            className="relative mt-8 min-w-0 sm:mt-10 lg:mt-0"
           >
-            <div className="relative rounded-[2.25rem] overflow-hidden shadow-soft-lg">
-              <img src={heroImg} alt="Three generations of a family" className="w-full h-[560px] object-cover" />
+            <div className="relative overflow-hidden rounded-[1.25rem] shadow-soft-lg sm:rounded-[1.75rem] lg:rounded-[2.25rem]">
+              <img
+                src={heroImg}
+                alt="Three generations of a family"
+                className="aspect-[4/5] h-auto max-h-[min(72dvh,28rem)] w-full object-cover object-[center_22%] sm:aspect-[5/4] sm:max-h-[26rem] md:max-h-[30rem] lg:aspect-auto lg:h-[560px] lg:max-h-none"
+              />
               <div className="absolute inset-0 bg-gradient-to-tr from-[hsl(120_30%_15%/0.55)] via-transparent to-transparent" />
               {/* Floating insight chip */}
-              <motion.div initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.6 }} className="absolute left-6 top-6 glass rounded-2xl px-4 py-3 max-w-[260px]">
-                <div className="flex items-center gap-2 mb-1">
+              <motion.div
+                initial={{ y: 10, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.6 }}
+                className="absolute left-3 top-3 max-w-[calc(100%-1.5rem)] glass rounded-xl px-3 py-2.5 sm:left-6 sm:top-6 sm:max-w-[260px] sm:rounded-2xl sm:px-4 sm:py-3"
+              >
+                <div className="mb-1 flex items-center gap-2">
                   <Sparkles size={14} stroke="red" aria-hidden />
-                  <span className="overline">AI Insight</span>
+                  <span className="overline text-[10px] sm:text-[11px]">AI Insight</span>
                 </div>
-                <p className="text-sm">Aaji's morning BP has climbed gently over 12 days — consider a calm chat.</p>
+                <p className="text-xs leading-snug sm:text-sm">
+                  Aaji&apos;s morning BP has climbed gently over 12 days — consider a calm chat.
+                </p>
               </motion.div> 
               {/* Voice chip */}
-              <motion.div initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.9 }} className="absolute right-6 bottom-6 glass rounded-2xl px-4 py-3 flex items-center gap-3">
-                <span className="pulse-dot" />
-                <div className="wave"><span style={{height:"30%"}}/><span style={{height:"60%"}}/><span style={{height:"90%"}}/><span style={{height:"45%"}}/><span style={{height:"75%"}}/><span style={{height:"30%"}}/></div>
-                <span className="text-xs text-muted-foreground">Meera · 12s</span>
+              <motion.div
+                initial={{ y: 10, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.9 }}
+                className="absolute bottom-3 left-3 right-3 flex items-center gap-2.5 glass rounded-xl px-3 py-2.5 sm:bottom-6 sm:left-auto sm:right-6 sm:w-auto sm:gap-3 sm:rounded-2xl sm:px-4 sm:py-3"
+              >
+                <span className="pulse-dot shrink-0" />
+                <div className="wave landing-wave-compact shrink-0">
+                  <span style={{ height: "30%" }} />
+                  <span style={{ height: "60%" }} />
+                  <span style={{ height: "90%" }} />
+                  <span style={{ height: "45%" }} />
+                  <span style={{ height: "75%" }} />
+                  <span style={{ height: "30%" }} />
+                </div>
+                <span className="min-w-0 truncate text-xs text-muted-foreground">Meera · 12s</span>
               </motion.div>
             </div>
             <div
-              className="absolute -inset-8 -z-10 rounded-full opacity-45 blur-3xl sm:-inset-10"
+              className="absolute -inset-4 -z-10 rounded-full opacity-40 blur-3xl sm:-inset-8 sm:opacity-45 lg:-inset-10"
               style={{ background: "radial-gradient(closest-side, hsl(38 80% 80%), transparent)" }}
               aria-hidden
             />
@@ -239,8 +273,8 @@ export default function LandingPage() {
         </section>
 
         {/* How it works */}
-        <section id="how-it-works" className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
-          <div className="grid gap-12 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-16 lg:items-start">
+        <section id="how-it-works" className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 sm:py-16 md:py-20 lg:px-8 lg:py-24">
+          <div className="grid gap-8 md:gap-12 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-16 lg:items-start">
             <div>
               <p className="overline text-muted-foreground">How it works</p>
               <h2 className="font-serif-display mt-3 text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-[2.75rem]">
@@ -251,7 +285,7 @@ export default function LandingPage() {
                 time — for you and for everyone you loop in.
               </p>
             </div>
-            <div className="grid gap-4 sm:grid-cols-3 lg:gap-5">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:gap-5">
               {[
                 {
                   n: "01",
@@ -303,13 +337,13 @@ export default function LandingPage() {
         </section>
 
         {/* Features */}
-        <section id="features" className="border-t border-border/40 bg-muted/15 py-16 sm:py-20 lg:py-24">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <section id="features" className="border-t border-border/40 bg-muted/15 py-12 sm:py-16 md:py-20 lg:py-24">
+          <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
             <p className="overline text-center text-muted-foreground">Features</p>
             <h2 className="font-serif-display mx-auto mt-3 max-w-2xl text-center text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
               Built for the long arc of care
             </h2>
-            <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5">
+            <div className="mt-8 grid grid-cols-1 gap-4 sm:mt-12 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5">
               {[
                 {
                   title: "Living timeline",
@@ -361,9 +395,9 @@ export default function LandingPage() {
         </section>
 
         {/* Quote */}
-        <section className="mx-auto max-w-3xl px-4 py-20 text-center sm:px-6 lg:px-8 lg:py-28">
-          <Quote className="mx-auto h-8 w-8 text-accent" strokeWidth={1.25} aria-hidden />
-          <blockquote className="font-serif-display mt-8 text-2xl font-medium leading-snug text-primary sm:text-3xl">
+        <section className="mx-auto w-full max-w-3xl px-4 py-14 text-center sm:px-6 sm:py-20 lg:px-8 lg:py-28">
+          <Quote className="mx-auto h-7 w-7 text-accent sm:h-8 sm:w-8" strokeWidth={1.25} aria-hidden />
+          <blockquote className="font-serif-display mt-6 text-xl font-medium leading-snug text-primary sm:mt-8 sm:text-2xl md:text-3xl">
             When my father was sick, three of us were caring for him from three cities. We were each holding a corner of
             the same blanket — and dropping pieces.{" "}
             <span className="text-primary">Family Health Memory is the loom.</span>
@@ -372,8 +406,8 @@ export default function LandingPage() {
         </section>
 
         {/* CTA card */}
-        <section className="mx-auto max-w-6xl px-4 pb-20 sm:px-6 lg:px-8 lg:pb-28">
-          <div className="overflow-hidden rounded-[2.5rem] bg-primary px-6 py-10 text-primary-foreground shadow-sm sm:px-10 sm:py-12 lg:grid lg:grid-cols-2 lg:items-center lg:gap-12 lg:rounded-[3rem] lg:px-14 lg:py-14">
+        <section className="mx-auto w-full max-w-6xl px-4 pb-16 sm:px-6 sm:pb-20 lg:px-8 lg:pb-28">
+          <div className="overflow-hidden rounded-[1.75rem] bg-primary px-5 py-8 text-primary-foreground shadow-sm sm:rounded-[2.5rem] sm:px-10 sm:py-12 lg:grid lg:grid-cols-2 lg:items-center lg:gap-12 lg:rounded-[3rem] lg:px-14 lg:py-14">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary-foreground/80">
                 Begin gently
@@ -382,14 +416,14 @@ export default function LandingPage() {
                 Open the room where your family lives a little longer.
               </h2>
             </div>
-            <div className="mt-8 lg:mt-0">
+            <div className="mt-6 text-center sm:mt-8 lg:mt-0 lg:text-left">
               <p className="text-sm leading-relaxed text-primary-foreground/90 sm:text-base">
                 Free to start with the people who matter most. No card needed. Most families are up and running in under
                 two minutes.
               </p>
               <Link
                 to="/sign-in?signup=1"
-                className="mt-6 inline-flex items-center justify-center gap-2 rounded-full bg-accent px-6 py-3.5 text-sm font-semibold text-accent-foreground shadow-sm transition hover:bg-accent/90"
+                className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full bg-accent px-6 py-3.5 text-sm font-semibold text-accent-foreground shadow-sm transition hover:bg-accent/90 sm:w-auto"
               >
                 Create our family workspace
                 <ArrowRight className="h-4 w-4" aria-hidden />
@@ -403,7 +437,7 @@ export default function LandingPage() {
       </main>
 
       <footer className="border-t border-border/50 py-8">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-4 text-xs text-muted-foreground sm:flex-row sm:px-6 lg:px-8">
+        <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-4 px-4 text-center text-xs text-muted-foreground sm:flex-row sm:px-6 sm:text-left lg:px-8">
           <p>© {new Date().getFullYear()} Family Health Memory · A quiet companion for caregiving households.</p>
           <p>Built with care</p>
         </div>
