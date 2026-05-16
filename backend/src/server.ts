@@ -37,6 +37,10 @@ import { renderDoctorSummaryPdf } from "./doctor-summary-export/pdfDocument.js";
 import { runMemorySearch } from "./health-memory-search.js";
 import { generateCareGuidance } from "./care-guidance/index.js";
 import {
+  registerWhatsAppConnectRoutes,
+  registerWhatsAppWebhookRoutes
+} from "./modules/whatsapp/routes/whatsapp.routes.js";
+import {
   createLog,
   createMember,
   deleteLog,
@@ -142,8 +146,13 @@ app.use(
     legacyHeaders: false
   })
 );
+
+registerWhatsAppWebhookRoutes(app);
+
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "1mb" }));
 startInsightJobs();
+
+registerWhatsAppConnectRoutes(app);
 
 app.get("/health", (_req, res) => {
   res.json({

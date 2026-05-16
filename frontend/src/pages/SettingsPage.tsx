@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Bell, ChevronRight, Palette, Shield, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeAppearanceControl } from "@/components/ThemeAppearanceControl";
+import WhatsAppConnectCard from "@/components/WhatsAppConnectCard";
 import { useApp } from "@/context/AppContext";
 import { toast } from "sonner";
 
@@ -21,6 +22,7 @@ export default function SettingsPage() {
         <h1 className="font-display text-lg font-bold text-foreground">Settings</h1>
       </div>
       <div className="space-y-4 px-5 py-5">
+        <WhatsAppConnectCard />
         <div className="rounded-2xl border border-border/60 bg-muted/20 p-4">
           <div className="mb-3 flex items-center gap-2">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
