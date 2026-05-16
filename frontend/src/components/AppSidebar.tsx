@@ -1,4 +1,4 @@
-import { Heart } from "lucide-react";
+import BrandMark from "@/components/BrandMark";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useApp } from "@/context/AppContext";
@@ -20,14 +20,8 @@ export default function AppSidebar() {
 
   return (
     <div className="flex h-full min-h-dvh flex-col border-r border-border/50 bg-gradient-to-b from-card via-card to-muted/30 px-3 py-6 xl:px-4">
-      <div className="mb-8 flex items-center gap-3 px-2">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-md">
-          <Heart className="h-5 w-5" fill="currentColor" aria-hidden />
-        </div>
-        <div className="min-w-0">
-          <p className="font-display text-sm font-bold tracking-tight text-foreground">Family Health Memory</p>
-          <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Private workspace</p>
-        </div>
+      <div className="mb-8 px-2">
+        <BrandMark />
       </div>
 
       <nav className="flex flex-1 flex-col gap-1" aria-label="Main">

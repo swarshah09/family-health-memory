@@ -10,6 +10,7 @@ import {
   Users
 } from "lucide-react";
 import { motion } from "framer-motion";
+import BrandMark from "@/components/BrandMark";
 import { cn } from "@/lib/utils";
 
 const fadeUp = {
@@ -75,14 +76,8 @@ function Nav() {
   return (
     <header className="sticky top-0 z-50 border-b border-border/50 bg-[hsl(var(--background)/0.88)] backdrop-blur-md">
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-2 px-4 py-3 sm:gap-4 sm:px-6 sm:py-4 lg:px-8">
-        <Link to="/" className="flex min-w-0 items-center gap-2 text-foreground sm:gap-2.5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground sm:h-9 sm:w-9">
-            f
-          </span>
-          <span className="truncate font-serif-display text-base font-semibold tracking-tight lowercase sm:text-lg lg:text-xl">
-            <span className="sm:hidden">family health</span>
-            <span className="hidden sm:inline">family health memory</span>
-          </span>
+        <Link to="/" className="min-w-0 shrink text-foreground transition hover:opacity-90">
+          <BrandMark compact />
         </Link>
         <nav className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
           <a href="#how-it-works" className="transition hover:text-foreground">
@@ -164,7 +159,7 @@ export default function LandingPage() {
               variants={fadeUp}
               className="mt-5 max-w-none font-sans text-[0.9375rem] font-normal leading-[1.65] text-muted-foreground sm:mt-6 sm:max-w-[26rem] sm:text-base sm:leading-[1.7]"
             >
-              Family Health Memory weaves together small observations, voice notes and vitals into a calm, intelligent
+              FamPulse weaves together small observations, voice notes and vitals into a calm, intelligent
               timeline — so the people you love are never seen in fragments again.
             </motion.p>
             <motion.div variants={fadeUp} className="mt-7 flex w-full flex-col gap-3 sm:mt-8 sm:flex-row sm:flex-wrap sm:items-center">
@@ -400,7 +395,7 @@ export default function LandingPage() {
           <blockquote className="font-serif-display mt-6 text-xl font-medium leading-snug text-primary sm:mt-8 sm:text-2xl md:text-3xl">
             When my father was sick, three of us were caring for him from three cities. We were each holding a corner of
             the same blanket — and dropping pieces.{" "}
-            <span className="text-primary">Family Health Memory is the loom.</span>
+            <span className="text-primary">FamPulse is the loom.</span>
           </blockquote>
           <p className="overline mt-10 text-muted-foreground">— Priya, Bengaluru · daughter of two</p>
         </section>
@@ -438,7 +433,7 @@ export default function LandingPage() {
 
       <footer className="border-t border-border/50 py-8">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-4 px-4 text-center text-xs text-muted-foreground sm:flex-row sm:px-6 sm:text-left lg:px-8">
-          <p>© {new Date().getFullYear()} Family Health Memory · A quiet companion for caregiving households.</p>
+          <p>© {new Date().getFullYear()} FamPulse · A quiet companion for caregiving households.</p>
           <p>Built with care</p>
         </div>
       </footer>

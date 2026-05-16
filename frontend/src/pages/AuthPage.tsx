@@ -6,6 +6,7 @@ import { ArrowRight, Building2, Eye, EyeOff, Hash, Lock, Mail, ShieldCheck, User
 import { motion, AnimatePresence } from "framer-motion";
 import { AppRequestError, toastError, toastFromCaughtError } from "@/lib/toast-errors";
 import { toast } from "sonner";
+import BrandMark from "@/components/BrandMark";
 import { ThemeAppearanceControl } from "@/components/ThemeAppearanceControl";
 import { useApp } from "@/context/AppContext";
 import { cn } from "@/lib/utils";
@@ -110,13 +111,8 @@ export default function AuthPage() {
           aria-hidden
         />
         <div className="relative z-10 flex h-full min-h-[42vh] flex-col justify-between p-6 sm:p-8 lg:min-h-dvh lg:p-10">
-          <Link to="/" className="flex w-fit items-center gap-2.5 text-white/95 transition hover:text-white">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/25 bg-white/10 text-sm font-semibold backdrop-blur-sm">
-              f
-            </span>
-            <span className="font-serif-display text-lg font-semibold tracking-tight lowercase sm:text-xl">
-              family memory
-            </span>
+          <Link to="/" className="w-fit transition hover:opacity-90">
+            <BrandMark onDark />
           </Link>
           <div className="max-w-md space-y-4 pb-2 lg:pb-4">
             <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-white/70">A quiet promise</p>
@@ -134,15 +130,21 @@ export default function AuthPage() {
       {/* Right — form */}
       <main className="relative flex w-full flex-1 flex-col justify-center px-5 py-10 sm:px-8 sm:py-12 lg:min-h-dvh lg:w-1/2 lg:min-w-0 lg:px-12 xl:px-16">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-background to-transparent lg:hidden" aria-hidden />
-        <div className="absolute right-4 top-[max(0.75rem,env(safe-area-inset-top))] z-10 sm:right-6 lg:right-8 lg:top-8">
-          <ThemeAppearanceControl />
-        </div>
-        <Link
-          to="/"
-          className="mb-6 text-sm font-medium text-muted-foreground transition hover:text-foreground lg:absolute lg:left-8 lg:top-8 lg:mb-0 xl:left-10"
+        <div
+          className={cn(
+            "relative z-10 mb-6 flex w-full items-center justify-between gap-3",
+            "pt-[max(0.25rem,env(safe-area-inset-top))]",
+            "lg:absolute lg:left-12 lg:right-12 lg:top-8 lg:mb-0 xl:left-16 xl:right-16"
+          )}
         >
-          ← Home
-        </Link>
+          <Link
+            to="/"
+            className="inline-flex shrink-0 items-center py-1 text-sm font-medium leading-none text-muted-foreground transition hover:text-foreground"
+          >
+            ← Home
+          </Link>
+          <ThemeAppearanceControl className="max-w-[min(100%,15.5rem)] shrink-0 justify-end sm:max-w-none" />
+        </div>
 
         <motion.div
           className="mx-auto w-full max-w-md"
@@ -340,7 +342,7 @@ export default function AuthPage() {
           <p className="mt-8 text-center text-sm text-muted-foreground">
             {mode === "login" ? (
               <>
-                New to Family Health Memory?{" "}
+                New to FamPulse?{" "}
                 <button
                   type="button"
                   onClick={() => setMode("signup")}

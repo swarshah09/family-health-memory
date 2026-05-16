@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Plus, Search } from "lucide-react";
 import AccountMenuButton from "@/components/AccountMenuButton";
+import BrandMark from "@/components/BrandMark";
 import { useApp } from "@/context/AppContext";
 import { cn } from "@/lib/utils";
 
@@ -13,8 +14,7 @@ type ChronicleFamilyBarProps = {
 export default function ChronicleFamilyBar({ onAdd, className }: ChronicleFamilyBarProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { workspaceName, workspaceTagline, members, user, dashboardPeopleFilterId, setDashboardPeopleFilterId } =
-    useApp();
+  const { members, user, dashboardPeopleFilterId, setDashboardPeopleFilterId } = useApp();
 
   const trackedMembers = useMemo(
     () => members.filter((m) => !m.linkedUserId || m.linkedUserId !== user?.id),
@@ -24,9 +24,6 @@ export default function ChronicleFamilyBar({ onAdd, className }: ChronicleFamily
   const memberMatch = /^\/member\/([^/]+)/.exec(location.pathname);
   const activeMemberId = memberMatch?.[1];
   const onDashboard = location.pathname === "/";
-
-  const title = workspaceName?.trim() || user?.familyName?.trim() || "Family workspace";
-  const tagline = workspaceTagline?.trim();
 
   const memberScrollRef = useRef<HTMLDivElement>(null);
   const [memberScrollLeft, setMemberScrollLeft] = useState(0);
@@ -62,36 +59,24 @@ export default function ChronicleFamilyBar({ onAdd, className }: ChronicleFamily
       className={cn(
         "chronicle-header-blur print:hidden",
         "sticky top-0 z-[55] overflow-hidden",
-        "flex flex-col gap-3 px-3 py-3",
-        "sm:grid sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-x-2 sm:gap-y-0 sm:px-4 sm:py-3.5",
+        "flex flex-col gap-2.5 px-3 py-3",
+        "sm:grid sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)] sm:items-center sm:gap-x-2 sm:gap-y-0 sm:px-4 sm:py-3.5",
         "lg:px-6",
         className
       )}
     >
       {/* Brand */}
-      <div className="flex min-w-0 shrink-0 items-center sm:max-w-[11rem] md:max-w-[13rem] lg:max-w-[14rem]">
+      <div className="flex min-w-0 shrink-0 items-center sm:max-w-[11rem] md:max-w-[13rem] lg:max-w-[15rem]">
         <button
           type="button"
           onClick={() => {
             setDashboardPeopleFilterId(null);
             navigate("/");
           }}
-          className="flex min-w-0 items-center gap-3 rounded-2xl text-left transition hover:bg-muted/40"
-          aria-label="Go to home"
+          className="flex min-w-0 items-center rounded-2xl text-left transition hover:bg-muted/40"
+          aria-label="FamPulse home"
         >
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground shadow-sm">
-            f
-          </span>
-          <span className="min-w-0">
-            <span className="font-serif-display truncate text-lg font-semibold leading-tight tracking-tight text-foreground sm:text-xl">
-              {title}
-            </span>
-            {tagline ? (
-              <span className="mt-0.5 block truncate text-xs text-muted-foreground">{tagline}</span>
-            ) : (
-              <span className="mt-0.5 block truncate text-xs text-muted-foreground">A circle of care since 1972</span>
-            )}
-          </span>
+          <BrandMark compact className="gap-3" />
         </button>
       </div>
 
@@ -162,22 +147,33 @@ export default function ChronicleFamilyBar({ onAdd, className }: ChronicleFamily
         />
       </div>
 
-      {/* Search + account + add — own column; sits after the clipped lane */}
-      <div className="relative z-10 flex shrink-0 items-center justify-end gap-2 bg-[hsl(var(--background)/0.98)] sm:gap-2.5 sm:pl-1">
+      {/* Search + add + profile */}
+      <div className="relative z-10 flex w-full min-w-0 items-center gap-1.5 sm:min-w-[12rem] sm:justify-end sm:gap-2 sm:bg-[hsl(var(--background)/0.98)] sm:pl-1 md:min-w-[14rem]">
         <button
           type="button"
           onClick={() => navigate("/insights/memory")}
-          className="input-chronicle flex w-full shrink-0 items-center gap-2 py-2 pl-3 pr-3 text-left text-muted-foreground sm:w-[12.5rem] md:w-[14rem]"
+          className={cn(
+            "input-chronicle flex min-h-9 min-w-0 flex-1 basis-0 items-center gap-2 py-2 pl-3 pr-2.5 text-left text-muted-foreground",
+            "!w-auto max-sm:max-w-none sm:flex-none sm:basis-auto sm:w-[10.5rem] md:w-[12.5rem] lg:w-[14rem]"
+          )}
           aria-label="Ask the memory"
         >
           <Search className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
-          <span className="truncate text-xs sm:text-sm">Ask the memory</span>
+          <span className="truncate text-xs sm:text-sm">
+            <span className="max-[380px]:hidden">Ask the memory</span>
+            <span className="hidden max-[380px]:inline">Ask memory</span>
+          </span>
         </button>
-        <AccountMenuButton />
-        <button type="button" onClick={onAdd} className="btn-chronicle-primary shrink-0 gap-1.5 px-4 py-2 text-xs sm:text-sm">
+        <button
+          type="button"
+          onClick={onAdd}
+          className="btn-chronicle-primary shrink-0 gap-1 px-2.5 py-2 text-xs sm:gap-1.5 sm:px-4 sm:text-sm"
+          aria-label="Add observation"
+        >
           <Plus className="h-4 w-4" aria-hidden />
-          Add
+          <span className="hidden min-[400px]:inline">Add</span>
         </button>
+        <AccountMenuButton className="h-9 w-9 shrink-0 sm:h-10 sm:w-10" />
       </div>
     </header>
   );
