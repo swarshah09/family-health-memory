@@ -55,7 +55,7 @@ export function handleWebhook(req: Request, res: Response): void {
       }
 
       const signature = req.get("x-hub-signature-256") ?? undefined;
-      whatsappWebhookService.receiveWebhook(rawBody, signature, parsed);
+      void whatsappWebhookService.receiveWebhook(rawBody, signature, parsed);
     } catch (err) {
       console.error("[whatsapp-webhook] receive error", err instanceof Error ? err.message : err);
     }

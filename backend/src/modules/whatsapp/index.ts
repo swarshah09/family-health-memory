@@ -9,6 +9,12 @@ export {
   createWhatsAppWebhookRouter
 } from "./routes/whatsapp.routes.js";
 export { whatsappWebhookService, WhatsAppWebhookService } from "./services/whatsapp-webhook.service.js";
+export { whatsappIngestionService, WhatsAppIngestionService } from "./services/whatsapp-ingestion.service.js";
+export {
+  whatsappMessageProcessingService,
+  WhatsAppMessageProcessingService
+} from "./services/whatsapp-message-processing.service.js";
+export { WhatsAppMessageModel } from "./models/whatsapp-message.model.js";
 export {
   whatsappConnectionService,
   WhatsAppConnectionService,
@@ -25,6 +31,12 @@ export type {
   WhatsAppWebhookParseResult,
   WhatsAppWebhookMessageType
 } from "./types/whatsapp-webhook.types.js";
+export type {
+  WhatsAppIngestionResult,
+  WhatsAppMessageDto,
+  WhatsAppStoredMessageType,
+  WhatsAppMessageProcessingStatus
+} from "./types/whatsapp-message.types.js";
 export { getWhatsAppEnvConfig, isWhatsAppConfigured } from "./utils/whatsapp-env.js";
 export { validateAndNormalizePhone, maskPhoneNumber } from "./utils/phone-validation.js";
 export { parseWhatsAppWebhookPayload, summarizeWebhookForLog } from "./utils/webhook-payload-parser.js";

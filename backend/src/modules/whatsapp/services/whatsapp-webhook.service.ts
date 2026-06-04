@@ -1,10 +1,9 @@
 import { getWhatsAppEnvConfig } from "../utils/whatsapp-env.js";
-import {
-  parseWhatsAppWebhookPayload,
-  summarizeWebhookForLog
-} from "../utils/webhook-payload-parser.js";
+import { summarizeWebhookForLog } from "../utils/webhook-payload-parser.js";
 import { verifyMetaWebhookSignature } from "../utils/webhook-signature.js";
+import { whatsappIngestionService } from "./whatsapp-ingestion.service.js";
 import type { WhatsAppWebhookVerifyQuery } from "../types/whatsapp-webhook.types.js";
+import type { WhatsAppIngestionResult } from "../types/whatsapp-message.types.js";
 
 export type WebhookVerifyResult =
   | { ok: true; challenge: string }
@@ -15,6 +14,7 @@ export type WebhookReceiveResult = {
   signatureValid: boolean;
   phoneNumberIdMatch: boolean;
   summary: Record<string, unknown>;
+  ingestion?: WhatsAppIngestionResult;
 };
 
 export class WhatsAppWebhookService {
@@ -36,14 +36,13 @@ export class WhatsAppWebhookService {
   }
 
   /**
-   * Lightweight receive handler: validate signature, parse structure, log summary.
-   * No health-memory ingestion.
+   * Validate signature, ingest storable messages, log compact summary.
    */
-  receiveWebhook(
+  async receiveWebhook(
     rawBody: Buffer,
     signatureHeader: string | undefined,
     parsedJson: unknown
-  ): WebhookReceiveResult {
+  ): Promise<WebhookReceiveResult> {
     const { phoneNumberId, appSecret } = getWhatsAppEnvConfig();
     let signatureValid = true;
 
@@ -62,36 +61,36 @@ export class WhatsAppWebhookService {
       console.warn("[whatsapp-webhook] WHATSAPP_APP_SECRET not set — skipping signature check");
     }
 
-    const parsed = parseWhatsAppWebhookPayload(parsedJson);
-    const phoneNumberIdMatch =
-      !phoneNumberId ||
-      parsed.events.every((e) => !e.phoneNumberId || e.phoneNumberId === phoneNumberId);
+    const ingestion = await whatsappIngestionService.ingestWebhookBody(parsedJson);
 
-    if (phoneNumberId && !phoneNumberIdMatch) {
-      console.warn("[whatsapp-webhook] phone_number_id mismatch", {
-        expected: `${phoneNumberId.slice(0, 4)}…`
-      });
-    }
+    const isProd = process.env.NODE_ENV === "production";
+    if (!isProd) {
+      const { parseWhatsAppWebhookPayload } = await import("../utils/webhook-payload-parser.js");
+      const parsed = parseWhatsAppWebhookPayload(parsedJson);
+      const phoneNumberIdMatch =
+        !phoneNumberId ||
+        parsed.events.every((e) => !e.phoneNumberId || e.phoneNumberId === phoneNumberId);
 
-    const summary = summarizeWebhookForLog(parsed);
-    console.info("[whatsapp-webhook] inbound", summary);
+      if (phoneNumberId && !phoneNumberIdMatch) {
+        console.warn("[whatsapp-webhook] phone_number_id mismatch", {
+          expected: `${phoneNumberId.slice(0, 4)}…`
+        });
+      }
 
-    for (const event of parsed.events) {
-      console.info("[whatsapp-webhook] event", {
-        kind: event.kind,
-        messageType: event.messageType,
-        sender: event.senderMasked,
-        recipient: event.recipientMasked,
-        status: event.status,
-        timestamp: event.timestamp
-      });
+      console.info("[whatsapp-webhook] inbound", summarizeWebhookForLog(parsed));
     }
 
     return {
       accepted: true,
       signatureValid,
-      phoneNumberIdMatch,
-      summary
+      phoneNumberIdMatch: true,
+      summary: {
+        stored: ingestion.stored,
+        received: ingestion.received,
+        unlinked: ingestion.unlinked,
+        duplicate: ingestion.duplicate
+      },
+      ingestion
     };
   }
 }

@@ -108,8 +108,15 @@ export class WhatsAppConnectionService {
     const code = generateVerificationCode();
     const sendResult = await sendWhatsAppVerificationCode(e164, code);
     if (!sendResult.sent) {
+      if (sendResult.metaErrorCode === 131030) {
+        throw new WhatsAppConnectionError(
+          "This number is not on your Meta app's test recipient list yet. In Meta Developer Console → WhatsApp → API Setup, add your full number (country code + number, no +), then try again.",
+          "SEND_FAILED"
+        );
+      }
       throw new WhatsAppConnectionError(
-        "We couldn't send a verification code right now. Try again shortly.",
+        sendResult.metaErrorMessage ||
+          "We couldn't send a verification code right now. Try again shortly.",
         "SEND_FAILED"
       );
     }
@@ -128,14 +135,26 @@ export class WhatsAppConnectionService {
       { upsert: true, new: true }
     ).lean();
 
-    const deliveryHint = sendResult.devFallback
-      ? "Check your server logs for the code in local development, or configure WhatsApp in your environment."
-      : "We sent a 6-digit code to your WhatsApp. Enter it below to finish connecting.";
+    const exposeDevCode =
+      sendResult.devFallback ||
+      (process.env.NODE_ENV !== "production" && process.env.WHATSAPP_EXPOSE_DEV_CODE !== "false");
+
+    let deliveryHint: string;
+    if (sendResult.devFallback) {
+      deliveryHint =
+        "Meta did not deliver the WhatsApp message (common in development). Use the code shown below — it is also in your backend terminal log.";
+    } else if (exposeDevCode) {
+      deliveryHint =
+        "We asked WhatsApp to send a code. If nothing arrives within a minute, use the code below (development fallback).";
+    } else {
+      deliveryHint =
+        "We sent a 6-digit code to your WhatsApp. Enter it below to finish connecting.";
+    }
 
     return {
       status: mapStatus(doc!),
       deliveryHint,
-      devCode: sendResult.devFallback ? code : undefined
+      devCode: exposeDevCode ? code : undefined
     };
   }
 

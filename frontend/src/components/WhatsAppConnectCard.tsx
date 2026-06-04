@@ -20,6 +20,7 @@ export default function WhatsAppConnectCard() {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [hint, setHint] = useState("");
+  const [devCode, setDevCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const loadStatus = useCallback(async () => {
@@ -50,10 +51,14 @@ export default function WhatsAppConnectCard() {
       const res = await initiateWhatsAppConnect(trimmed);
       setStatus(res.status);
       setHint(res.message);
+      setDevCode(res.devCode ?? null);
       setStep("verify");
-      toast.success("Check WhatsApp", { description: res.message });
       if (res.devCode) {
-        toast.message("Development code", { description: res.devCode });
+        toast.message("Use this code to connect", {
+          description: `${res.devCode} — WhatsApp may not deliver in development mode.`
+        });
+      } else {
+        toast.success("Check WhatsApp", { description: res.message });
       }
     } catch (err) {
       if (err instanceof AppRequestError) toastError(err.toastTitle, err.toastDescription);
@@ -188,6 +193,19 @@ export default function WhatsAppConnectCard() {
             </p>
           ) : null}
           {hint ? <p className="text-xs text-muted-foreground leading-relaxed">{hint}</p> : null}
+          {devCode ? (
+            <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-center">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-amber-900/80 dark:text-amber-100/80">
+                Your verification code
+              </p>
+              <p className="mt-1 font-mono text-2xl font-semibold tracking-[0.2em] text-foreground tabular-nums">
+                {devCode}
+              </p>
+              <p className="mt-1.5 text-[11px] text-muted-foreground leading-relaxed">
+                WhatsApp often does not deliver this in development. Enter it above to finish linking.
+              </p>
+            </div>
+          ) : null}
           <div className="space-y-1.5">
             <label htmlFor="wa-code" className="text-xs font-medium text-muted-foreground">
               6-digit code
@@ -222,9 +240,19 @@ export default function WhatsAppConnectCard() {
             onClick={() => {
               setStep("idle");
               setCode("");
+              setDevCode(null);
             }}
           >
             Use a different number
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9 w-full rounded-xl border-border/60"
+            disabled={busy}
+            onClick={() => void onSendCode()}
+          >
+            Resend code
           </Button>
         </div>
       ) : null}
