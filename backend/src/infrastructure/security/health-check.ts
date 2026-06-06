@@ -1,23 +1,26 @@
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
-import { checkRedisHealth } from "../queue/index.js";
+import { checkRedisHealth, isRedisConfigured } from "../queue/index.js";
 import { getAllWorkers } from "../queue/queue-workers.js";
 
 /**
  * Health Check endpoints for load balancers and monitoring.
  *
- * /health      — basic liveness (DB + Redis)
- * /health/ready — readiness (all workers healthy)
+ * /health      — basic liveness (DB required, Redis optional)
+ * /health/ready — readiness (DB + Redis if configured + workers if registered)
  */
 
 export async function healthCheck(_req: Request, res: Response): Promise<void> {
   const dbHealthy = mongoose.connection.readyState === 1;
-  let redisHealthy = false;
+  const redisConfigured = isRedisConfigured();
+  let redisHealthy = !redisConfigured; // healthy by default when not configured
 
-  try {
-    redisHealthy = await checkRedisHealth();
-  } catch {
-    redisHealthy = false;
+  if (redisConfigured) {
+    try {
+      redisHealthy = await checkRedisHealth();
+    } catch {
+      redisHealthy = false;
+    }
   }
 
   const healthy = dbHealthy && redisHealthy;
@@ -27,19 +30,24 @@ export async function healthCheck(_req: Request, res: Response): Promise<void> {
     timestamp: new Date().toISOString(),
     checks: {
       database: dbHealthy ? "connected" : "disconnected",
-      redis: redisHealthy ? "connected" : "disconnected"
+      redis: redisConfigured
+        ? (redisHealthy ? "connected" : "disconnected")
+        : "not_configured"
     }
   });
 }
 
 export async function readinessCheck(_req: Request, res: Response): Promise<void> {
   const dbHealthy = mongoose.connection.readyState === 1;
-  let redisHealthy = false;
+  const redisConfigured = isRedisConfigured();
+  let redisHealthy = !redisConfigured;
 
-  try {
-    redisHealthy = await checkRedisHealth();
-  } catch {
-    redisHealthy = false;
+  if (redisConfigured) {
+    try {
+      redisHealthy = await checkRedisHealth();
+    } catch {
+      redisHealthy = false;
+    }
   }
 
   const workers = getAllWorkers();
@@ -50,7 +58,8 @@ export async function readinessCheck(_req: Request, res: Response): Promise<void
     workerStatus[name] = worker.isRunning() ? "running" : "stopped";
   }
 
-  const allWorkersRunning = Object.values(workerStatus).every(
+  // When Redis is not configured, no workers are expected
+  const allWorkersRunning = workerCount === 0 || Object.values(workerStatus).every(
     (s) => s === "running"
   );
   const ready = dbHealthy && redisHealthy && allWorkersRunning;
@@ -60,7 +69,9 @@ export async function readinessCheck(_req: Request, res: Response): Promise<void
     timestamp: new Date().toISOString(),
     checks: {
       database: dbHealthy ? "connected" : "disconnected",
-      redis: redisHealthy ? "connected" : "disconnected",
+      redis: redisConfigured
+        ? (redisHealthy ? "connected" : "disconnected")
+        : "not_configured",
       workers: {
         total: workerCount,
         status: workerStatus

@@ -6,7 +6,8 @@ export {
   getQueueConnectionOpts,
   getWorkerConnectionOpts,
   checkRedisHealth,
-  closeQueueConnection
+  closeQueueConnection,
+  isRedisConfigured
 } from "./queue-connection.js";
 
 export {

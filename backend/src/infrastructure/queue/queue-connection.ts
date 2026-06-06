@@ -11,6 +11,15 @@ import type { ConnectionOptions } from "bullmq";
 
 let _healthCheckConn: Redis | null = null;
 
+/**
+ * Returns true only if REDIS_URL is explicitly set in the environment.
+ * When false, the entire queue system is disabled and the app runs
+ * in-process (setImmediate fallback).
+ */
+export function isRedisConfigured(): boolean {
+  return !!process.env.REDIS_URL?.trim();
+}
+
 function getRedisUrl(): string {
   return process.env.REDIS_URL?.trim() || "redis://localhost:6379";
 }
@@ -43,13 +52,14 @@ export function getWorkerConnectionOpts(): ConnectionOptions {
  * Checks if Redis is reachable using standalone ioredis.
  */
 export async function checkRedisHealth(): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
   try {
     if (!_healthCheckConn) {
       _healthCheckConn = new Redis(getRedisUrl(), {
         maxRetriesPerRequest: 1,
         enableReadyCheck: false,
         lazyConnect: true,
-        retryStrategy() { return null; } // Don't retry health checks
+        retryStrategy() { return null; }
       });
     }
     await _healthCheckConn.connect().catch(() => {/* already connected */});

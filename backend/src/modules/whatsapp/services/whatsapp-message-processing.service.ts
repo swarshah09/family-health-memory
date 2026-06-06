@@ -7,7 +7,7 @@ import { profileResolutionService } from "../../profile-resolution/index.js";
 import { timelineService } from "../../timeline/index.js";
 import { voiceProcessingService } from "../../voice-processing/index.js";
 import { explainabilityService } from "../../explainability/index.js";
-import { getQueue, QUEUE_NAMES } from "../../../infrastructure/queue/index.js";
+import { getQueue, QUEUE_NAMES, isRedisConfigured } from "../../../infrastructure/queue/index.js";
 import { WhatsAppMessageModel } from "../models/whatsapp-message.model.js";
 import type { WhatsAppMessageDto, WhatsAppMessageProcessingStatus } from "../types/whatsapp-message.types.js";
 
@@ -48,6 +48,17 @@ export class WhatsAppMessageProcessingService {
    * Falls back to setImmediate if Redis is unavailable.
    */
   enqueue(messageId: string): void {
+    // Skip queue when Redis is not configured — use in-process fallback
+    if (!isRedisConfigured()) {
+      setImmediate(() => {
+        void this.processMessage(messageId).catch((err) => {
+          console.error("[whatsapp-process] processing error", messageId,
+            err instanceof Error ? err.message : err);
+        });
+      });
+      return;
+    }
+
     const queue = getQueue(QUEUE_NAMES.WHATSAPP_INGESTION);
     queue
       .add("process-message", { messageId }, { jobId: `msg-${messageId}` })
@@ -59,14 +70,10 @@ export class WhatsAppMessageProcessingService {
           messageId,
           error: err instanceof Error ? err.message : "unknown"
         });
-        // Fallback: process in-memory if Redis is down
         setImmediate(() => {
           void this.processMessage(messageId).catch((processErr) => {
-            console.error(
-              "[whatsapp-process] fallback processing error",
-              messageId,
-              processErr instanceof Error ? processErr.message : processErr
-            );
+            console.error("[whatsapp-process] fallback processing error", messageId,
+              processErr instanceof Error ? processErr.message : processErr);
           });
         });
       });

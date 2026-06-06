@@ -30,7 +30,7 @@ import { listAuditLogs, writeAuditLog } from "./audit.js";
 import { ingestChatStyleLog } from "./chat-input.js";
 import { generateWeeklyDigestForUserPerson } from "./insight-precompute.js";
 import { startInsightJobs } from "./jobs.js";
-import { registerWorker, QUEUE_NAMES } from "./infrastructure/queue/index.js";
+import { registerWorker, QUEUE_NAMES, isRedisConfigured } from "./infrastructure/queue/index.js";
 import { processMessageJob } from "./infrastructure/workers/message-processing.worker.js";
 import { processTranscriptionJob } from "./infrastructure/workers/transcription.worker.js";
 import { processBatchJob } from "./infrastructure/workers/batch-processing.worker.js";
@@ -159,15 +159,19 @@ app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "1mb" }));
 startInsightJobs();
 
 // ── Queue Workers (after DB connect) ────────────────────────────────────
-try {
-  registerWorker({ name: QUEUE_NAMES.WHATSAPP_INGESTION, processor: processMessageJob });
-  registerWorker({ name: QUEUE_NAMES.VOICE_TRANSCRIPTION, processor: processTranscriptionJob });
-  registerWorker({ name: QUEUE_NAMES.DIGEST_GENERATION, processor: processBatchJob, concurrency: 1 });
-  console.info("[server] Queue workers registered");
-} catch (err) {
-  console.warn("[server] Queue workers not started (Redis may be unavailable)", {
-    error: err instanceof Error ? err.message : "unknown"
-  });
+if (isRedisConfigured()) {
+  try {
+    registerWorker({ name: QUEUE_NAMES.WHATSAPP_INGESTION, processor: processMessageJob });
+    registerWorker({ name: QUEUE_NAMES.VOICE_TRANSCRIPTION, processor: processTranscriptionJob });
+    registerWorker({ name: QUEUE_NAMES.DIGEST_GENERATION, processor: processBatchJob, concurrency: 1 });
+    console.info("[server] Queue workers registered (Redis connected)");
+  } catch (err) {
+    console.warn("[server] Queue workers failed to start", {
+      error: err instanceof Error ? err.message : "unknown"
+    });
+  }
+} else {
+  console.info("[server] REDIS_URL not set — running without queue workers (in-process fallback)");
 }
 
 registerWhatsAppConnectRoutes(app);
