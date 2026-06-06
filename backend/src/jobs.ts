@@ -1,6 +1,10 @@
 import cron from "node-cron";
 import { getAllActiveFamilyIds, runAutomationAnalysis } from "./store.js";
 import { runDailyInsightPrecomputeJob, runWeeklyDigestPrecomputeJob } from "./insight-precompute.js";
+import { digestService } from "./modules/weekly-digest-engine/index.js";
+import { followupService } from "./modules/followup-engine/index.js";
+import { careGuidanceService } from "./modules/care-guidance/index.js";
+import { getQueue, QUEUE_NAMES } from "./infrastructure/queue/index.js";
 
 export function startInsightJobs(): void {
   // Runs once every 24 hours at 2:00 AM server time.
@@ -38,4 +42,39 @@ export function startInsightJobs(): void {
       console.error("Weekly digest precompute job failed", error);
     }
   });
+
+  // Runs every Sunday at 4:00 AM — health intelligence batch via queue.
+  cron.schedule("0 4 * * 0", async () => {
+    try {
+      const queue = getQueue(QUEUE_NAMES.DIGEST_GENERATION);
+      await queue.add(
+        "weekly-batch",
+        { type: "full-batch", triggeredBy: "cron" },
+        { jobId: `batch-${Date.now()}` }
+      );
+      console.log("[jobs] Weekly batch job enqueued");
+    } catch (err) {
+      console.warn("[jobs] Queue unavailable, running batch directly", {
+        error: err instanceof Error ? err.message : "unknown"
+      });
+
+      // Fallback: direct execution
+      try {
+        await digestService.runScheduledDigestGeneration();
+      } catch (error) {
+        console.error("[jobs] Digest generation failed", error);
+      }
+      try {
+        await followupService.runScheduledFollowupGeneration();
+      } catch (error) {
+        console.error("[jobs] Follow-up generation failed", error);
+      }
+      try {
+        await careGuidanceService.runScheduledGuidanceGeneration();
+      } catch (error) {
+        console.error("[jobs] Care guidance generation failed", error);
+      }
+    }
+  });
 }
+

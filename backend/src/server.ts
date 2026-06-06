@@ -30,6 +30,12 @@ import { listAuditLogs, writeAuditLog } from "./audit.js";
 import { ingestChatStyleLog } from "./chat-input.js";
 import { generateWeeklyDigestForUserPerson } from "./insight-precompute.js";
 import { startInsightJobs } from "./jobs.js";
+import { registerWorker, QUEUE_NAMES } from "./infrastructure/queue/index.js";
+import { processMessageJob } from "./infrastructure/workers/message-processing.worker.js";
+import { processTranscriptionJob } from "./infrastructure/workers/transcription.worker.js";
+import { processBatchJob } from "./infrastructure/workers/batch-processing.worker.js";
+import { healthCheck, readinessCheck } from "./infrastructure/security/index.js";
+import { registerGracefulShutdown } from "./infrastructure/graceful-shutdown.js";
 import { HealthLogModel, RefreshTokenModel, UserModel } from "./models.js";
 import { processVoiceLogTranscriptionAsync } from "./voice-processing.js";
 import { readVoiceArtifact, writeVoiceArtifact } from "./voice-storage.js";
@@ -152,13 +158,28 @@ registerWhatsAppWebhookRoutes(app);
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "1mb" }));
 startInsightJobs();
 
+// ── Queue Workers (after DB connect) ────────────────────────────────────
+try {
+  registerWorker({ name: QUEUE_NAMES.WHATSAPP_INGESTION, processor: processMessageJob });
+  registerWorker({ name: QUEUE_NAMES.VOICE_TRANSCRIPTION, processor: processTranscriptionJob });
+  registerWorker({ name: QUEUE_NAMES.DIGEST_GENERATION, processor: processBatchJob, concurrency: 1 });
+  console.info("[server] Queue workers registered");
+} catch (err) {
+  console.warn("[server] Queue workers not started (Redis may be unavailable)", {
+    error: err instanceof Error ? err.message : "unknown"
+  });
+}
+
 registerWhatsAppConnectRoutes(app);
 
-app.get("/health", (_req, res) => {
+app.get("/health", healthCheck);
+app.get("/health/ready", readinessCheck);
+
+// Keep legacy health response for backward compatibility
+app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     service: "family-health-memory-api",
-    /** Bump when adding routes so clients can tell an old deploy from a new one */
     apiCapabilities: {
       memorySearch: true,
       conversationalMemoryPostPath: "/api/families/:familyId/memory-search"
@@ -1896,6 +1917,9 @@ app.post(
   }
 );
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`Family Health Memory API running on http://localhost:${port}`);
 });
+
+// ── Graceful Shutdown ───────────────────────────────────────────────────
+registerGracefulShutdown(server);

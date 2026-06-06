@@ -3,6 +3,7 @@ import express, { Router as createRouter } from "express";
 import rateLimit from "express-rate-limit";
 import * as webhookController from "../controllers/whatsapp-webhook.controller.js";
 import { createWhatsAppConnectRouter } from "./whatsapp-connect.routes.js";
+import { webhookHardeningMiddleware } from "../../../infrastructure/security/index.js";
 
 const WEBHOOK_BASE = "/api/whatsapp";
 
@@ -24,6 +25,7 @@ export function registerWhatsAppWebhookRoutes(app: Express): void {
   app.post(
     `${WEBHOOK_BASE}/webhook`,
     webhookPostLimiter,
+    webhookHardeningMiddleware,
     express.raw({ type: "application/json", limit: webhookBodyLimit }),
     webhookController.handleWebhook
   );

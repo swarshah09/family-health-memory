@@ -1,7 +1,13 @@
 import { UserModel } from "../../../models.js";
 import { listMembers } from "../../../store.js";
 import { healthObservationExtractionService } from "../../ai-extraction/index.js";
+import { healthMemoryService } from "../../health-memory/index.js";
+import { patternEngineService } from "../../pattern-engine/index.js";
 import { profileResolutionService } from "../../profile-resolution/index.js";
+import { timelineService } from "../../timeline/index.js";
+import { voiceProcessingService } from "../../voice-processing/index.js";
+import { explainabilityService } from "../../explainability/index.js";
+import { getQueue, QUEUE_NAMES } from "../../../infrastructure/queue/index.js";
 import { WhatsAppMessageModel } from "../models/whatsapp-message.model.js";
 import type { WhatsAppMessageDto, WhatsAppMessageProcessingStatus } from "../types/whatsapp-message.types.js";
 
@@ -32,19 +38,38 @@ function mapDoc(doc: {
 }
 
 /**
- * Background pipeline: AI extraction → profile resolution (no health logs or insights).
+ * Background pipeline:
+ * [AUDIO] voice transcription → extraction → resolution → memory → timeline → patterns
+ * [TEXT]  extraction → resolution → memory → timeline → patterns
  */
 export class WhatsAppMessageProcessingService {
+  /**
+   * Enqueues a message for background processing via BullMQ.
+   * Falls back to setImmediate if Redis is unavailable.
+   */
   enqueue(messageId: string): void {
-    setImmediate(() => {
-      void this.processMessage(messageId).catch((err) => {
-        console.error(
-          "[whatsapp-process] unhandled error",
+    const queue = getQueue(QUEUE_NAMES.WHATSAPP_INGESTION);
+    queue
+      .add("process-message", { messageId }, { jobId: `msg-${messageId}` })
+      .then(() => {
+        console.info("[whatsapp-process] enqueued", { messageId });
+      })
+      .catch((err) => {
+        console.warn("[whatsapp-process] queue unavailable, falling back to setImmediate", {
           messageId,
-          err instanceof Error ? err.message : err
-        );
+          error: err instanceof Error ? err.message : "unknown"
+        });
+        // Fallback: process in-memory if Redis is down
+        setImmediate(() => {
+          void this.processMessage(messageId).catch((processErr) => {
+            console.error(
+              "[whatsapp-process] fallback processing error",
+              messageId,
+              processErr instanceof Error ? processErr.message : processErr
+            );
+          });
+        });
       });
-    });
   }
 
   async processMessage(messageId: string): Promise<void> {
@@ -62,20 +87,64 @@ export class WhatsAppMessageProcessingService {
 
     try {
       const sender = await UserModel.findById(msg.senderUserId).select("name").lean();
-      const rawText = msg.rawText?.trim() || "";
+      let rawText = msg.rawText?.trim() || "";
+      let effectiveMessageType: string = msg.messageType;
+
+      // Step 0: Voice transcription (for AUDIO messages only)
+      if (msg.messageType === "AUDIO" && msg.mediaUrl) {
+        try {
+          const voiceResult = await voiceProcessingService.processVoiceMessage(
+            {
+              messageId: msg._id.toString(),
+              familyId: msg.familyId,
+              senderUserId: msg.senderUserId,
+              mediaUrl: msg.mediaUrl,
+              messageType: msg.messageType
+            },
+            msg.rawPayload as Record<string, unknown> | undefined
+          );
+
+          if (voiceResult.status === "COMPLETED" && voiceResult.transcriptText) {
+            rawText = voiceResult.transcriptText;
+            effectiveMessageType = "VOICE";
+            console.info("[whatsapp-process] voice transcribed", {
+              messageId,
+              recordingId: voiceResult.recordingId,
+              textLength: rawText.length
+            });
+          } else if (voiceResult.status === "SKIPPED_DUPLICATE" && voiceResult.transcriptText) {
+            rawText = voiceResult.transcriptText;
+            effectiveMessageType = "VOICE";
+          } else {
+            console.warn("[whatsapp-process] voice transcription did not produce text", {
+              messageId,
+              status: voiceResult.status,
+              reason: voiceResult.reason
+            });
+            // Continue with empty text — extraction will handle gracefully
+          }
+        } catch (voiceErr) {
+          console.warn("[whatsapp-process] voice processing failed (non-blocking)", {
+            messageId,
+            error: voiceErr instanceof Error ? voiceErr.message : "unknown"
+          });
+          // Continue pipeline with empty rawText — won't produce useful extraction
+          // but won't block the pipeline
+        }
+      }
 
       const extraction = await healthObservationExtractionService.extractAndStore({
         messageId: msg._id.toString(),
         familyId: msg.familyId,
         senderUserId: msg.senderUserId,
         senderDisplayName: sender?.name?.trim() || "Family member",
-        messageType: msg.messageType,
+        messageType: effectiveMessageType,
         rawText,
         receivedAt: msg.receivedAt.toISOString(),
         familyMembers: memberContexts
       });
 
-      await profileResolutionService.resolveAndStore({
+      const resolution = await profileResolutionService.resolveAndStore({
         messageId: msg._id.toString(),
         senderUserId: msg.senderUserId,
         rawText,
@@ -83,6 +152,61 @@ export class WhatsAppMessageProcessingService {
         extractionConfidence: extraction.confidence,
         familyMembers: memberContexts
       });
+
+      // Step 3: Health memory creation (non-blocking — failures are logged, not thrown)
+      try {
+        const memoryResult = await healthMemoryService.createFromPipelineResult({
+          messageId: msg._id.toString(),
+          familyId: msg.familyId,
+          senderUserId: msg.senderUserId,
+          rawText,
+          messageType: effectiveMessageType,
+          extraction,
+          resolution
+        });
+
+        // Steps 4–5: Timeline processing + Pattern analysis (non-blocking)
+        if (memoryResult.status === "CREATED" && memoryResult.memoryId) {
+          try {
+            const record = await healthMemoryService.getByMessageId(msg._id.toString());
+            if (record) {
+              await timelineService.processMemoryRecord(record);
+              if (resolution.resolvedProfileId) {
+                await patternEngineService.analyzeProfile(
+                  resolution.resolvedProfileId,
+                  msg.familyId
+                );
+              }
+
+              // Step 6: Register evidence chain (non-blocking)
+              try {
+                await explainabilityService.registerPipelineEvidence({
+                  messageId: msg._id.toString(),
+                  extractionId: extraction.extractionId,
+                  resolutionId: resolution.resolutionId,
+                  memoryId: memoryResult.memoryId ?? undefined,
+                  confidence: Math.min(extraction.confidence, resolution.confidence)
+                });
+              } catch (evidenceErr) {
+                console.warn("[whatsapp-process] evidence registration failed (non-blocking)", {
+                  messageId,
+                  error: evidenceErr instanceof Error ? evidenceErr.message : "unknown"
+                });
+              }
+            }
+          } catch (pipeErr) {
+            console.warn("[whatsapp-process] timeline/pattern failed (non-blocking)", {
+              messageId,
+              error: pipeErr instanceof Error ? pipeErr.message : "unknown"
+            });
+          }
+        }
+      } catch (memErr) {
+        console.warn("[whatsapp-process] health memory creation failed (non-blocking)", {
+          messageId,
+          error: memErr instanceof Error ? memErr.message : "unknown"
+        });
+      }
 
       await this.markStatus(messageId, "PROCESSED");
     } catch (err) {
